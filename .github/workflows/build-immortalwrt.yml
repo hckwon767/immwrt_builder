@@ -163,20 +163,23 @@ jobs:
           echo "── 커스텀 패키지 목록 ──"
           ls -la custom-repo/
 
-          APK_BIN=$(find "$(pwd)" -maxdepth 5 -type f -name apk -perm -u+x 2>/dev/null | head -n1)
-          echo "Resolved apk binary path: ${APK_BIN:-NOT FOUND}"
-          if [ -z "$APK_BIN" ]; then
-            echo "::error::apk 바이너리를 못 찾았습니다"
-            exit 1
+          # 커스텀 패키지가 존재할 경우에만 인덱싱 및 추가
+          if [ -n "$(ls -A custom-repo/*.apk 2>/dev/null)" ]; then
+            APK_BIN=$(find "$(pwd)" -maxdepth 5 -type f -name apk -perm -u+x 2>/dev/null | head -n1)
+            echo "Resolved apk binary path: ${APK_BIN:-NOT FOUND}"
+            
+            if [ -n "$APK_BIN" ]; then
+              openssl ecparam -name prime256v1 -genkey -noout -out custom.sec
+              openssl ec -in custom.sec -pubout -out custom.pub
+              cp custom.pub keys/custom-repo.pub
+
+              (cd custom-repo && "$APK_BIN" mkndx --allow-untrusted --sign "$(pwd)/../custom.sec" --output packages.adb *.apk)
+              
+              # 기존 repositories 파일을 유지하면서 아래에 추가
+              echo "$(pwd)/custom-repo" >> repositories
+            fi
           fi
 
-          openssl ecparam -name prime256v1 -genkey -noout -out custom.sec
-          openssl ec -in custom.sec -pubout -out custom.pub
-          cp custom.pub keys/custom-repo.pub
-
-          (cd custom-repo && "$APK_BIN" mkndx --allow-untrusted --sign "$(pwd)/../custom.sec" --output packages.adb *.apk)
-
-          echo "file://$(pwd)/custom-repo/packages.adb" >> repositories
           echo "── 최종 repositories ──"
           cat repositories
           echo "── keys 디렉토리 ──"
