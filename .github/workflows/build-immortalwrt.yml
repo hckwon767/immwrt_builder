@@ -48,7 +48,7 @@ jobs:
           echo "Resolved SDK: $SDK_FILE"
           curl -L --retry 3 --fail "${DOWNLOAD_BASE}/${SDK_FILE}" -o sdk.tar.zst
           mkdir sdk && tar --use-compress-program=unzstd -xf sdk.tar.zst -C sdk --strip-components=1
-  
+
       - name: Add Custom Package Sources
         run: |
           cd sdk
@@ -144,7 +144,7 @@ jobs:
         run: |
           curl -sL "${DOWNLOAD_BASE}/sha256sums" -o sha256sums
           IB_FILE=$(grep -oE 'immortalwrt-imagebuilder-[^ ]*\.tar\.zst' sha256sums | head -n1)
-          
+
           if [ -z "$IB_FILE" ]; then
             echo "::error::ImageBuilder 바이너리를 sha256sums에서 찾을 수 없습니다"
             exit 1
@@ -167,16 +167,19 @@ jobs:
           if [ -n "$(ls -A custom-repo/*.apk 2>/dev/null)" ]; then
             APK_BIN=$(find "$(pwd)" -maxdepth 5 -type f -name apk -perm -u+x 2>/dev/null | head -n1)
             echo "Resolved apk binary path: ${APK_BIN:-NOT FOUND}"
-            
+
             if [ -n "$APK_BIN" ]; then
               openssl ecparam -name prime256v1 -genkey -noout -out custom.sec
               openssl ec -in custom.sec -pubout -out custom.pub
               cp custom.pub keys/custom-repo.pub
 
               (cd custom-repo && "$APK_BIN" mkndx --allow-untrusted --sign "$(pwd)/../custom.sec" --output packages.adb *.apk)
-              
-              # 기존 repositories 파일을 유지하면서 아래에 추가
-              echo "$(pwd)/custom-repo" >> repositories
+
+              # NOTE: 최신 apk-tools는 로컬 경로에 file:// 스킴이 없으면
+              # repositories 파일의 항목을 인식하지 못하고 레거시 경로
+              # (<repo>/<arch>/APKINDEX.tar.gz)를 찾다가 실패합니다.
+              # (관련 이슈: openwrt/openwrt#18032, #23154)
+              echo "file://$(pwd)/custom-repo" >> repositories
             fi
           fi
 
@@ -250,20 +253,31 @@ jobs:
               ethtool iperf3 libiperf3 usbutils usbids kmod-usb-printer \
               smartmontools smartmontools-drivedb hd-idle luci-app-hd-idle luci-app-diskman \
             " \
-            FILES="files" \
-            EXTRA_IMAGE_NAME="ko-custom"
+            FILES="files"
 
       - name: Prepare Artifacts for Release
         id: organize
         run: |
           cd "imagebuilder/bin/targets/${TARGET}/${SUBTARGET}"
+          echo "── 빌드 결과물 전체 목록 ──"
+          ls -la
+
           mkdir -p /tmp/release_files
-          cp -a *sysupgrade.bin /tmp/release_files/ 2>/dev/null || true
-          cp -a *factory.bin /tmp/release_files/ 2>/dev/null || true
-          cp -a *sdcard*.img.gz /tmp/release_files/ 2>/dev/null || true
-          cp -a *initramfs*.bin /tmp/release_files/ 2>/dev/null || true
-          cp -a *.manifest /tmp/release_files/ 2>/dev/null || true
-          cp -a sha256sums /tmp/release_files/ 2>/dev/null || true
+
+          # 요청된 3종 이미지 (파일명 패턴에 상관없이 매칭)
+          cp -av *ext4-sdcard.img.gz        /tmp/release_files/ 2>/dev/null || echo "::warning::ext4-sdcard.img.gz 없음"
+          cp -av *squashfs-sdcard.img.gz    /tmp/release_files/ 2>/dev/null || echo "::warning::squashfs-sdcard.img.gz 없음"
+          cp -av *initramfs-kernel.bin      /tmp/release_files/ 2>/dev/null || echo "::warning::initramfs-kernel.bin 없음"
+
+          # manifest / config / feeds 정보 (요청하신 "manifest, config, feed" 메타데이터)
+          cp -av *.manifest        /tmp/release_files/ 2>/dev/null || true
+          cp -av config.buildinfo  /tmp/release_files/ 2>/dev/null || true
+          cp -av feeds.buildinfo   /tmp/release_files/ 2>/dev/null || true
+          cp -av version.buildinfo /tmp/release_files/ 2>/dev/null || true
+          cp -av sha256sums        /tmp/release_files/ 2>/dev/null || true
+
+          echo "── 릴리즈에 포함될 파일 ──"
+          ls -la /tmp/release_files/
 
           TAG_NAME="ImmortalWrt-orangepi-zero3-$(date +'%Y.%m.%d-%H%M')"
           echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
