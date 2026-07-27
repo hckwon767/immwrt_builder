@@ -1,13 +1,13 @@
-name: Build ImmortalWrt for ASUS TUF-AX4200Q (SDK + ImageBuilder)
+name: Build ImmortalWrt for orangepi-zero3 (SDK + ImageBuilder)
 
 on:
   workflow_dispatch:
 
 env:
-  TARGET: mediatek
-  SUBTARGET: filogic
-  PROFILE: asus_tuf-ax4200q
-  DOWNLOAD_BASE: https://downloads.immortalwrt.org/snapshots/targets/mediatek/filogic
+  TARGET: sunxi
+  SUBTARGET: cortexa53
+  PROFILE: orangepi-zero3
+  DOWNLOAD_BASE: https://downloads.immortalwrt.org/snapshots/targets/sunxi/cortexa53/
 
 permissions:
   contents: write
@@ -256,7 +256,7 @@ jobs:
           cp -a *.manifest /tmp/release_files/ 2>/dev/null || true
           cp -a sha256sums /tmp/release_files/ 2>/dev/null || true
 
-          TAG_NAME="ImmortalWrt-ASUS-TUF-AX4200Q-$(date +'%Y.%m.%d-%H%M')"
+          TAG_NAME="ImmortalWrt-orangepi-zero3-$(date +'%Y.%m.%d-%H%M')"
           echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
           echo "RELEASE_PATH=/tmp/release_files" >> $GITHUB_OUTPUT
 
