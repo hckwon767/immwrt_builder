@@ -7,7 +7,7 @@ env:
   TARGET: sunxi
   SUBTARGET: cortexa53
   PROFILE: orangepi-zero3
-  DOWNLOAD_BASE: https://downloads.immortalwrt.org/snapshots/targets/sunxi/cortexa53/
+  DOWNLOAD_BASE: https://downloads.immortalwrt.org/snapshots/targets/sunxi/cortexa53
 
 permissions:
   contents: write
