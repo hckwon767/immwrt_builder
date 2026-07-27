@@ -43,12 +43,12 @@ jobs:
       - name: Resolve & Download SDK
         run: |
           curl -sL "${DOWNLOAD_BASE}/sha256sums" -o sha256sums
-          SDK_FILE=$(grep -oE 'immortalwrt-sdk-mediatek-filogic[^ ]*\.tar\.zst' sha256sums | head -n1)
+          SDK_FILE=$(grep -oE 'immortalwrt-sdk-[^ ]*\.tar\.zst' sha256sums | head -n1)
           echo "SDK_FILE=$SDK_FILE" >> $GITHUB_ENV
           echo "Resolved SDK: $SDK_FILE"
           curl -L --retry 3 --fail "${DOWNLOAD_BASE}/${SDK_FILE}" -o sdk.tar.zst
           mkdir sdk && tar --use-compress-program=unzstd -xf sdk.tar.zst -C sdk --strip-components=1
-
+  
       - name: Add Custom Package Sources
         run: |
           cd sdk
