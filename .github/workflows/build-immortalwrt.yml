@@ -143,17 +143,23 @@ jobs:
       - name: Resolve & Download ImageBuilder
         run: |
           curl -sL "${DOWNLOAD_BASE}/sha256sums" -o sha256sums
-          IB_FILE=$(grep -oE 'immortalwrt-imagebuilder-mediatek-filogic[^ ]*\.tar\.zst' sha256sums | head -n1)
+          IB_FILE=$(grep -oE 'immortalwrt-imagebuilder-[^ ]*\.tar\.zst' sha256sums | head -n1)
+          
+          if [ -z "$IB_FILE" ]; then
+            echo "::error::ImageBuilder 바이너리를 sha256sums에서 찾을 수 없습니다"
+            exit 1
+          fi
+
           echo "IB_FILE=$IB_FILE" >> $GITHUB_ENV
           echo "Resolved ImageBuilder: $IB_FILE"
           curl -L --retry 3 --fail "${DOWNLOAD_BASE}/${IB_FILE}" -o imagebuilder.tar.zst
-          mkdir imagebuilder && tar --use-compress-program=unzstd -xf imagebuilder.tar.zst -C imagebuilder --strip-components=1
+          mkdir -p imagebuilder && tar --use-compress-program=unzstd -xf imagebuilder.tar.zst -C imagebuilder --strip-components=1
 
       - name: Register Custom Package Repo
         run: |
           cd imagebuilder
           mkdir -p custom-repo keys
-          cp ../custom-packages/*.apk custom-repo/
+          cp ../custom-packages/*.apk custom-repo/ 2>/dev/null || true
           echo "── 커스텀 패키지 목록 ──"
           ls -la custom-repo/
 
@@ -247,12 +253,12 @@ jobs:
       - name: Prepare Artifacts for Release
         id: organize
         run: |
-          cd imagebuilder/bin/targets/mediatek/filogic
+          cd "imagebuilder/bin/targets/${TARGET}/${SUBTARGET}"
           mkdir -p /tmp/release_files
           cp -a *sysupgrade.bin /tmp/release_files/ 2>/dev/null || true
           cp -a *factory.bin /tmp/release_files/ 2>/dev/null || true
+          cp -a *sdcard*.img.gz /tmp/release_files/ 2>/dev/null || true
           cp -a *initramfs*.bin /tmp/release_files/ 2>/dev/null || true
-          cp -a *initramfs*.kernel /tmp/release_files/ 2>/dev/null || true
           cp -a *.manifest /tmp/release_files/ 2>/dev/null || true
           cp -a sha256sums /tmp/release_files/ 2>/dev/null || true
 
