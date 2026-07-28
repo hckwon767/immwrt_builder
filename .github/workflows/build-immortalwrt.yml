@@ -26,7 +26,7 @@ on:
       hostname:
         description: "장치 호스트네임"
         required: true
-        default: "ASUS_VPNBOX"
+        default: "VPNBOX"
       timezone:
         description: "타임존 (zonename)"
         required: true
@@ -132,6 +132,21 @@ jobs:
           # ImageBuilder tarball에는 이 스크립트가 없으므로 SDK에서 미리 복사해둔다
           cp sdk/scripts/ipkg-make-index.sh ./ipkg-make-index.sh
           chmod +x ./ipkg-make-index.sh
+
+          # ipkg-make-index.sh는 원래 build system이 만들어주는 host/mkhash 툴을
+          # $MKHASH 환경변수로 넘겨 받아 "$MKHASH sha256 <file>" 형태로 호출한다.
+          # SDK 단독 실행 시엔 이 값이 없으므로 sha256sum을 감싼 래퍼로 대체한다.
+          cat > ./mkhash <<'MKHASH_EOF'
+          #!/bin/sh
+          algo="$1"; shift
+          case "$algo" in
+            sha256) sha256sum "$1" | cut -d' ' -f1 ;;
+            md5) md5sum "$1" | cut -d' ' -f1 ;;
+            *) echo "mkhash: unsupported algo $algo" >&2; exit 1 ;;
+          esac
+          MKHASH_EOF
+          chmod +x ./mkhash
+          echo "MKHASH=$(pwd)/mkhash" >> "$GITHUB_ENV"
 
       - name: luci-theme-alpha 소스 가져오기 + brand.png 교체
         run: |
