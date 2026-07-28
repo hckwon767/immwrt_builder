@@ -1,1 +1,558 @@
-build-immortalwrt-nikki.yml
+name: Build ImmortalWrt (SDK + ImageBuilder)
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "타겟 (예: mediatek, sunxi)"
+        required: true
+        default: "mediatek"
+      subtarget:
+        description: "서브타겟 (예: filogic, cortexa53)"
+        required: true
+        default: "filogic"
+      profile:
+        description: "프로필 (예: asus_tuf-ax4200q, xunlong_orangepi-zero3)"
+        required: true
+        default: "asus_tuf-ax4200q"
+      branch:
+        description: "추적할 마이너 릴리스 브랜치 (예: 24.10) - 이 안에서 최신 패치버전을 자동 탐색"
+        required: true
+        default: "24.10"
+      version_pin:
+        description: "특정 버전 강제 고정 (예: 24.10.5). 비워두면 branch 내 최신 자동 선택"
+        required: false
+        default: ""
+      hostname:
+        description: "장치 호스트네임"
+        required: true
+        default: "ASUS_VPNBOX"
+
+permissions:
+  contents: write
+
+env:
+  TARGET: ${{ inputs.target }}
+  SUBTARGET: ${{ inputs.subtarget }}
+  PROFILE: ${{ inputs.profile }}
+  BRANCH: ${{ inputs.branch }}
+  VERSION_PIN: ${{ inputs.version_pin }}
+  DEVICE_HOSTNAME: ${{ inputs.hostname }}
+  DEVICE_TZ: "Asia/Shanghai"
+  LUCI_LANG: "ko"
+  THEME_REPO: https://github.com/derisamedia/luci-theme-alpha
+  THEME_PKG: luci-theme-alpha
+  THEME_CONFIG_REPO: https://github.com/animegasan/luci-app-alpha-config
+  THEME_CONFIG_PKG: luci-app-alpha-config
+  BRAND_BASE_URL: https://raw.githubusercontent.com/hckwon767/immwrt_builder/refs/heads/main
+  DASHBOARD_KO_URL: https://github.com/hckwon767/dashboard-ko/releases/latest/download/zashboard-ko.zip
+  DASHBOARD_KO_LABEL: "Zashboard (한국어)"
+  # OpenClash: luci-app-openclash는 prebuilt ipk를 그대로 받아서
+  # (1) ui/metacubexd 폴더 삭제, (2) ui/zashboard 내용을 DASHBOARD_KO_URL로 교체
+  # 두 가지만 패치한 뒤 재패키징해서 사용한다. 소스 컴파일은 하지 않는다.
+  OPENCLASH_API: https://api.github.com/repos/vernesong/OpenClash/releases/latest
+  # 방화벽 백엔드: 24.10은 opkg 기반이며 nftables(firewall4)가 기본이다.
+  # 구형 iptables 백엔드를 쓰는 경우 "iptables"로 변경.
+  OPENCLASH_FW: "nftables"
+  # OpenClash 코어: vernesong/OpenClash 저장소의 "core" 브랜치 master/smart 경로에서
+  # 직접 받는다 (OpenClash가 자체 빌드해 올리는 Smart 코어 - mihomo 공식 릴리스가 아님).
+  # 이미지 빌드 시점에 imagebuilder가 판별한 아키텍처에 맞춰 자동으로 받아 clash_meta로 내장한다.
+  OPENCLASH_CORE_BASE: https://raw.githubusercontent.com/vernesong/OpenClash/core/master/smart
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: 호스트 빌드 의존성 설치
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang flex bison g++ gawk \
+            gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev \
+            python3-setuptools rsync swig unzip zlib1g-dev file wget curl zstd ccache
+
+      # ---------------------------------------------------------------
+      # 1) branch 내 최신 릴리스 버전 자동 탐색 (또는 version_pin 사용)
+      # ---------------------------------------------------------------
+      - name: 최신 릴리스 버전 및 SDK/ImageBuilder 파일명 자동 탐색
+        id: resolve
+        run: |
+          set -euo pipefail
+
+          if [ -n "${VERSION_PIN}" ]; then
+            VERSION="${VERSION_PIN}"
+            echo "버전 강제 고정: ${VERSION}"
+          else
+            INDEX_HTML=$(curl -fsSL "https://downloads.immortalwrt.org/releases/")
+            VERSION=$(echo "${INDEX_HTML}" \
+              | grep -oE "href=\"${BRANCH}\.[0-9]+/\"" \
+              | sed -E 's/href="(.*)\/"/\1/' \
+              | sort -V | tail -n1)
+            if [ -z "${VERSION}" ]; then
+              echo "::error::${BRANCH} 브랜치에서 릴리스 버전을 찾지 못했습니다."
+              exit 1
+            fi
+            echo "자동 선택된 최신 버전: ${VERSION}"
+          fi
+
+          DOWNLOAD_BASE="https://downloads.immortalwrt.org/releases/${VERSION}/targets/${TARGET}/${SUBTARGET}"
+          PAGE=$(curl -fsSL "${DOWNLOAD_BASE}/")
+
+          IB_FILE=$(echo "${PAGE}" | grep -oE "immortalwrt-imagebuilder-[^\"]+\.tar\.zst" | head -n1)
+          SDK_FILE=$(echo "${PAGE}" | grep -oE "immortalwrt-sdk-[^\"]+\.tar\.zst" | head -n1)
+
+          if [ -z "${IB_FILE}" ] || [ -z "${SDK_FILE}" ]; then
+            echo "::error::${TARGET}/${SUBTARGET} 용 ImageBuilder/SDK 파일을 ${VERSION}에서 찾지 못했습니다."
+            echo "${PAGE}"
+            exit 1
+          fi
+
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "download_base=${DOWNLOAD_BASE}" >> "$GITHUB_OUTPUT"
+          echo "ib_file=${IB_FILE}" >> "$GITHUB_OUTPUT"
+          echo "sdk_file=${SDK_FILE}" >> "$GITHUB_OUTPUT"
+          echo "ib_url=${DOWNLOAD_BASE}/${IB_FILE}" >> "$GITHUB_OUTPUT"
+          echo "sdk_url=${DOWNLOAD_BASE}/${SDK_FILE}" >> "$GITHUB_OUTPUT"
+
+      - name: 다운로드 캐시
+        uses: actions/cache@v4
+        with:
+          path: |
+            sdk.tar.zst
+            imagebuilder.tar.zst
+          key: immortalwrt-${{ steps.resolve.outputs.version }}-${{ env.TARGET }}-${{ env.SUBTARGET }}
+
+      # ccache: 동일/유사 소스 재컴파일 시 컴파일러 호출 결과를 재사용해 빌드 시간을 크게 줄인다.
+      # 캐시 키를 run_id로 항상 새로 만들고 restore-keys로 직전 캐시를 이어받는 방식이라
+      # 캐시가 무한정 부풀지 않으면서도(오래된 run의 캐시는 GitHub가 정리) 항상 최신 결과를 저장한다.
+      - name: ccache 캐시
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-${{ env.TARGET }}-${{ env.SUBTARGET }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-${{ env.TARGET }}-${{ env.SUBTARGET }}-
+
+      # 패키지 소스 아카이브(dl/) 캐시: feeds/패키지 컴파일 시 매번 새로 받는
+      # 업스트림 소스 tarball을 재사용한다. 버전이 바뀌어도 대부분의 소스는
+      # 그대로이므로 restore-keys로 이전 버전 캐시를 이어받는다.
+      - name: 패키지 소스(dl) 캐시
+        uses: actions/cache@v4
+        with:
+          path: sdk/dl
+          key: dl-${{ env.TARGET }}-${{ env.SUBTARGET }}-${{ steps.resolve.outputs.version }}
+          restore-keys: |
+            dl-${{ env.TARGET }}-${{ env.SUBTARGET }}-
+
+      - name: ccache 환경 설정
+        run: |
+          mkdir -p ~/.ccache
+          echo "USE_CCACHE=1" >> "$GITHUB_ENV"
+          echo "CCACHE_DIR=$HOME/.ccache" >> "$GITHUB_ENV"
+          echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+          # 컴파일 커맨드가 매번 미묘하게 달라지는 상황(타임스탬프 등)에서도
+          # 캐시 적중률을 높이기 위한 완화 옵션
+          echo "CCACHE_COMPRESS=1" >> "$GITHUB_ENV"
+          echo "CCACHE_SLOPPINESS=file_macro,time_macros,include_file_mtime,include_file_ctime,pch_defines" >> "$GITHUB_ENV"
+          ccache -M 5G
+          ccache -z
+
+      # ---------------------------------------------------------------
+      # 2) SDK 단계: luci-theme-alpha 컴파일 (brand.png 교체 포함)
+      #    OpenClash(luci-app-openclash)는 SDK에서 컴파일하지 않는다.
+      #    순수 Lua/JS 패키지라 공식 prebuilt ipk를 그대로 받아 쓰고,
+      #    ui/metacubexd 삭제 + ui/zashboard 교체만 패치해서 재사용한다
+      #    (아래 3단계 "OpenClash ipk 준비" 스텝 참고).
+      # ---------------------------------------------------------------
+      - name: SDK 다운로드 및 압축 해제
+        run: |
+          set -euo pipefail
+          [ -f sdk.tar.zst ] || curl -fsSL -o sdk.tar.zst "${{ steps.resolve.outputs.sdk_url }}"
+          mkdir -p sdk
+          tar --use-compress-program=unzstd -xf sdk.tar.zst -C sdk --strip-components=1
+          # ImageBuilder tarball에는 이 스크립트가 없으므로 SDK에서 미리 복사해둔다
+          cp sdk/scripts/ipkg-make-index.sh ./ipkg-make-index.sh
+          chmod +x ./ipkg-make-index.sh
+
+          # ipkg-make-index.sh는 원래 build system이 만들어주는 host/mkhash 툴을
+          # $MKHASH 환경변수로 넘겨 받아 "$MKHASH sha256 <file>" 형태로 호출한다.
+          # SDK 단독 실행 시엔 이 값이 없으므로 sha256sum을 감싼 래퍼로 대체한다.
+          cat > ./mkhash <<'MKHASH_EOF'
+          #!/bin/sh
+          algo="$1"; shift
+          case "$algo" in
+            sha256) sha256sum "$1" | cut -d' ' -f1 ;;
+            md5) md5sum "$1" | cut -d' ' -f1 ;;
+            *) echo "mkhash: unsupported algo $algo" >&2; exit 1 ;;
+          esac
+          MKHASH_EOF
+          chmod +x ./mkhash
+          echo "MKHASH=$(pwd)/mkhash" >> "$GITHUB_ENV"
+
+      - name: luci-theme-alpha 소스 가져오기 + brand.png 교체
+        run: |
+          set -euo pipefail
+          rm -rf "sdk/package/${THEME_PKG}"
+          git clone --depth 1 "${THEME_REPO}" "sdk/package/${THEME_PKG}"
+
+          # PROFILE 전용 브랜드 이미지(${PROFILE}.png)가 있으면 그것을 사용하고,
+          # 없으면(404 등) 기본 brand.png로 폴백한다.
+          PROFILE_BRAND_URL="${BRAND_BASE_URL}/${PROFILE}.png"
+          DEFAULT_BRAND_URL="${BRAND_BASE_URL}/brand.png"
+
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${PROFILE_BRAND_URL}")
+          if [ "${HTTP_CODE}" = "200" ]; then
+            BRAND_URL="${PROFILE_BRAND_URL}"
+            echo "프로필 전용 브랜드 이미지 사용: ${BRAND_URL}"
+          else
+            BRAND_URL="${DEFAULT_BRAND_URL}"
+            echo "프로필 전용 브랜드 이미지(${PROFILE_BRAND_URL})를 찾지 못해(HTTP ${HTTP_CODE}) 기본값 사용: ${BRAND_URL}"
+          fi
+
+          curl -L --retry 3 --fail "${BRAND_URL}" -o /tmp/brand.png
+
+          # brand.png가 실제 위치할 수 있는 모든 경로에 적용 (테마 버전에 따라 경로가 다를 수 있음)
+          cp -f /tmp/brand.png "sdk/package/${THEME_PKG}/luasrc/brand.png" || true
+          cp -f /tmp/brand.png "sdk/package/${THEME_PKG}/luasrc/style/brand.png" || true
+          find "sdk/package/${THEME_PKG}" -type f -iname "brand.png" -exec cp -f /tmp/brand.png {} \;
+
+      - name: luci-app-alpha-config 소스 가져오기 (테마 필수 의존 패키지)
+        run: |
+          set -euo pipefail
+          # luci-theme-alpha는 luci-app-alpha-config가 없으면 설치가 거부된다.
+          # 공식 opkg 피드에는 없으므로 같은 방식으로 SDK에서 같이 빌드한다.
+          rm -rf "sdk/package/${THEME_CONFIG_PKG}"
+          git clone --depth 1 "${THEME_CONFIG_REPO}" "sdk/package/${THEME_CONFIG_PKG}"
+
+      - name: SDK feeds 업데이트/설치 및 테마 패키지 컴파일
+        run: |
+          set -euo pipefail
+          cd sdk
+          ./scripts/feeds update -a 2>&1 | tee ../feeds-update.log
+          ./scripts/feeds install -a 2>&1 | tee ../feeds-install.log
+          ./scripts/feeds list -s > ../feeds-list.log || true
+
+          # ccache 활성화 (호스트에 ccache가 설치되어 있으면 SDK가 자동으로 감지해 사용한다)
+          echo "CONFIG_CCACHE=y" >> .config
+          make defconfig
+          make "package/${THEME_PKG}/compile" -j"$(nproc)" V=s 2>&1 | tee ../sdk-build-theme.log
+          make "package/${THEME_CONFIG_PKG}/compile" -j"$(nproc)" V=s 2>&1 | tee ../sdk-build-theme-config.log
+
+          echo "── ccache 통계 ──"
+          ccache -s || true
+
+      - name: 컴파일된 커스텀 ipk 수집
+        id: theme_ipk
+        run: |
+          set -euo pipefail
+          mkdir -p custom-packages
+          find sdk/bin/packages \
+            \( -iname "${THEME_PKG}*.ipk" -o -iname "${THEME_CONFIG_PKG}*.ipk" \) \
+            -exec cp -f {} custom-packages/ \;
+          ls -la custom-packages/
+
+      # ---------------------------------------------------------------
+      # 2-1) OpenClash ipk 준비: 공식 prebuilt ipk를 받아
+      #      (a) ui/metacubexd 폴더 삭제
+      #      (b) ui/zashboard 폴더 내용을 DASHBOARD_KO_URL(커스텀 버전)로 교체
+      #      한 뒤 재패키징해서 custom-packages/에 넣는다.
+      #      control.tar.gz(의존성 등 메타데이터)는 원본 그대로 재사용하고
+      #      data.tar.gz만 다시 만든다.
+      # ---------------------------------------------------------------
+      - name: OpenClash ipk 다운로드 및 UI 패치
+        run: |
+          set -euo pipefail
+
+          OC_JSON=$(curl -fsSL "${OPENCLASH_API}")
+          OC_IPK_URL=$(echo "${OC_JSON}" | python3 -c '
+          import json, sys
+          d = json.load(sys.stdin)
+          for a in d.get("assets", []):
+              name = a["name"]
+              if name.endswith(".ipk") and "luci-app-openclash" in name:
+                  print(a["browser_download_url"])
+                  break
+          ')
+          if [ -z "${OC_IPK_URL}" ]; then
+            echo "::error::OpenClash 최신 릴리스에서 luci-app-openclash ipk를 찾지 못했습니다."
+            echo "${OC_JSON}" | head -c 2000
+            exit 1
+          fi
+          echo "OpenClash ipk: ${OC_IPK_URL}"
+          curl -L --retry 3 --fail -o /tmp/openclash-orig.ipk "${OC_IPK_URL}"
+
+          rm -rf /tmp/oc-work
+          mkdir -p /tmp/oc-work
+          cd /tmp/oc-work
+          ar x /tmp/openclash-orig.ipk
+          mkdir -p data
+          tar -xzf data.tar.gz -C data
+
+          UI_ROOT="data/usr/share/openclash/ui"
+          if [ ! -d "${UI_ROOT}" ]; then
+            echo "::error::ipk 안에서 ${UI_ROOT} 경로를 찾지 못했습니다. OpenClash 패키지 구조가 바뀌었을 수 있습니다."
+            exit 1
+          fi
+
+          # (a) metacubexd 삭제
+          if [ -d "${UI_ROOT}/metacubexd" ]; then
+            rm -rf "${UI_ROOT}/metacubexd"
+            echo "ui/metacubexd 삭제 완료"
+          else
+            echo "WARNING: ui/metacubexd 폴더를 찾지 못했습니다 (이미 없거나 구조 변경 가능성)"
+          fi
+
+          # (b) zashboard 폴더를 커스텀 버전으로 교체
+          ZDIR=$(find "${UI_ROOT}" -maxdepth 1 -type d -iname '*zashboard*' | head -n1)
+          if [ -z "${ZDIR}" ]; then
+            ZDIR="${UI_ROOT}/zashboard"
+            echo "WARNING: 기존 zashboard 폴더를 찾지 못해 새로 생성합니다: ${ZDIR}"
+          fi
+          mkdir -p "${ZDIR}"
+          rm -rf "${ZDIR:?}"/*
+
+          curl -L --retry 3 --fail -o /tmp/dashboard-ko.zip "${DASHBOARD_KO_URL}"
+          rm -rf /tmp/dashboard-ko-extract
+          mkdir -p /tmp/dashboard-ko-extract
+          unzip -q -o /tmp/dashboard-ko.zip -d /tmp/dashboard-ko-extract
+
+          TOP_ENTRIES=$(find /tmp/dashboard-ko-extract -mindepth 1 -maxdepth 1)
+          TOP_COUNT=$(echo "${TOP_ENTRIES}" | wc -l)
+          if [ "${TOP_COUNT}" -eq 1 ] && [ -d "${TOP_ENTRIES}" ]; then
+            cp -a "${TOP_ENTRIES}/." "${ZDIR}/"
+          else
+            cp -a /tmp/dashboard-ko-extract/. "${ZDIR}/"
+          fi
+          echo "ui/zashboard 교체 완료: ${ZDIR}"
+
+          rm -f data.tar.gz
+          tar -czf data.tar.gz -C data .
+          ar rcs /tmp/luci-app-openclash_custom.ipk debian-binary control.tar.gz data.tar.gz
+
+          mkdir -p "${GITHUB_WORKSPACE}/custom-packages"
+          cp -f /tmp/luci-app-openclash_custom.ipk "${GITHUB_WORKSPACE}/custom-packages/"
+          ls -la "${GITHUB_WORKSPACE}/custom-packages/"
+
+      # ---------------------------------------------------------------
+      # 3) ImageBuilder 단계
+      # ---------------------------------------------------------------
+      - name: ImageBuilder 다운로드 및 압축 해제
+        run: |
+          set -euo pipefail
+          [ -f imagebuilder.tar.zst ] || curl -fsSL -o imagebuilder.tar.zst "${{ steps.resolve.outputs.ib_url }}"
+          mkdir -p imagebuilder
+          tar --use-compress-program=unzstd -xf imagebuilder.tar.zst -C imagebuilder --strip-components=1
+
+      - name: 아키텍처 판별 및 로컬 커스텀 피드 등록
+        id: repo
+        run: |
+          set -euo pipefail
+          cd imagebuilder
+
+          ARCH_PACKAGES=$(grep -oP '(?<=CONFIG_TARGET_ARCH_PACKAGES=")[^"]+' .config)
+          echo "arch_packages=${ARCH_PACKAGES}" >> "$GITHUB_OUTPUT"
+          echo "판별된 아키텍처: ${ARCH_PACKAGES}"
+
+          mkdir -p custom-packages
+          cp -f ../custom-packages/*.ipk custom-packages/ 2>/dev/null || true
+
+          # 주의: ipkg-make-index.sh에 넘기는 인자가 그대로 Packages의 Filename: 필드에
+          # 기록된다. 여기서 "custom-packages"라는 상대경로를 넘기면 Filename이
+          # "custom-packages/foo.ipk"로 기록되고, repositories.conf의 저장소 기준 URL이
+          # 이미 ".../imagebuilder/custom-packages"이므로 opkg가 두 경로를 이어붙여
+          # ".../custom-packages/custom-packages/foo.ipk"라는 잘못된 이중 경로로
+          # 다운로드를 시도하게 된다. 디렉터리 안에서 "."을 인자로 넘겨 이를 방지한다.
+          (cd custom-packages && ../../ipkg-make-index.sh . > Packages && gzip -9nk -f Packages)
+
+          # 서명 확인 비활성화: 로컬 커스텀 피드를 쓰기 위한 트레이드오프.
+          sed -i '/option check_signature/d' repositories.conf
+
+          echo "src/gz custom file://$(pwd)/custom-packages" | cat - repositories.conf > repositories.conf.new
+          mv repositories.conf.new repositories.conf
+
+          cat repositories.conf
+
+      - name: OpenClash Smart 코어 다운로드 및 내장
+        run: |
+          set -euo pipefail
+          ARCH_PACKAGES="${{ steps.repo.outputs.arch_packages }}"
+
+          # OpenWrt ARCH_PACKAGES -> vernesong/OpenClash core 저장소(master/smart)의
+          # 파일명 후보 목록. 여러 후보를 우선순위대로 시도해 실제 존재하는 파일을 받는다.
+          # (amd64는 GOAMD64 레벨별로 파일이 나뉘어 있어 v3 -> v2 -> v1 -> 무접미사 순으로 시도)
+          # 새 아키텍처를 빌드해야 하면 이 case문에 후보를 추가할 것.
+          case "${ARCH_PACKAGES}" in
+            aarch64_*) CANDIDATES="clash-linux-arm64.tar.gz clash-linux-armv8.tar.gz" ;;
+            arm_cortex-a7*|arm_cortex-a8*|arm_cortex-a9*|arm_cortex-a15*) CANDIDATES="clash-linux-armv7.tar.gz" ;;
+            arm_arm1176jzf-s_vfp|arm_arm1136j-s) CANDIDATES="clash-linux-armv6.tar.gz clash-linux-armv7.tar.gz" ;;
+            arm_arm926ej-s) CANDIDATES="clash-linux-armv5.tar.gz" ;;
+            x86_64) CANDIDATES="clash-linux-amd64-v3.tar.gz clash-linux-amd64-v2.tar.gz clash-linux-amd64-v1.tar.gz clash-linux-amd64.tar.gz" ;;
+            i386_*) CANDIDATES="clash-linux-386.tar.gz" ;;
+            mipsel_24kc|mipsel_24kc_24kf) CANDIDATES="clash-linux-mipsle-softfloat.tar.gz" ;;
+            mipsel_74kc) CANDIDATES="clash-linux-mipsle-hardfloat.tar.gz" ;;
+            mips_24kc) CANDIDATES="clash-linux-mips-softfloat.tar.gz" ;;
+            mips64el_*) CANDIDATES="clash-linux-mips64le.tar.gz" ;;
+            riscv64_*) CANDIDATES="clash-linux-riscv64.tar.gz" ;;
+            loongarch64_*) CANDIDATES="clash-linux-loong64.tar.gz clash-linux-loongarch64.tar.gz" ;;
+            *)
+              echo "::error::OpenClash core 아키텍처 매핑을 찾을 수 없습니다: ${ARCH_PACKAGES}"
+              echo "::error::이 워크플로의 'OpenClash Smart 코어 다운로드 및 내장' 스텝 case문에 후보를 추가해주세요."
+              exit 1
+              ;;
+          esac
+
+          CORE_URL=""
+          for f in ${CANDIDATES}; do
+            CANDIDATE_URL="${OPENCLASH_CORE_BASE}/${f}"
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${CANDIDATE_URL}")
+            if [ "${HTTP_CODE}" = "200" ]; then
+              CORE_URL="${CANDIDATE_URL}"
+              echo "코어 파일 확인됨: ${CORE_URL}"
+              break
+            else
+              echo "후보 실패(HTTP ${HTTP_CODE}): ${CANDIDATE_URL}"
+            fi
+          done
+
+          if [ -z "${CORE_URL}" ]; then
+            echo "::error::${ARCH_PACKAGES}에 해당하는 OpenClash core 파일을 찾지 못했습니다. 후보: ${CANDIDATES}"
+            echo "::error::https://github.com/vernesong/OpenClash/tree/core/master/smart 에서 실제 파일명을 확인해 case문을 갱신해주세요."
+            exit 1
+          fi
+
+          curl -L --retry 3 --fail -o /tmp/openclash-core.tar.gz "${CORE_URL}"
+
+          rm -rf /tmp/oc-core-extract
+          mkdir -p /tmp/oc-core-extract
+          tar -xzf /tmp/openclash-core.tar.gz -C /tmp/oc-core-extract
+
+          # 압축 안에 단일 실행 바이너리(보통 이름이 "clash")가 들어있다.
+          # 디렉터리가 아닌 파일 중 가장 큰 것을 코어 바이너리로 간주한다.
+          CORE_BIN=$(find /tmp/oc-core-extract -type f | xargs -r ls -S | head -n1)
+          if [ -z "${CORE_BIN}" ]; then
+            echo "::error::압축 파일 안에서 코어 바이너리를 찾지 못했습니다."
+            exit 1
+          fi
+          echo "코어 바이너리: ${CORE_BIN}"
+
+          mkdir -p imagebuilder/files/etc/openclash/core
+          cp -f "${CORE_BIN}" imagebuilder/files/etc/openclash/core/clash_meta
+          chmod +x imagebuilder/files/etc/openclash/core/clash_meta
+          ls -la imagebuilder/files/etc/openclash/core/
+
+      - name: 부팅시 기본값(uci-defaults) 생성
+        run: |
+          set -euo pipefail
+          mkdir -p imagebuilder/files/etc/uci-defaults
+          cat > imagebuilder/files/etc/uci-defaults/99-custom-defaults <<EOF
+          #!/bin/sh
+          uci set system.@system[0].hostname='${DEVICE_HOSTNAME}'
+          uci set system.@system[0].zonename='${DEVICE_TZ}'
+          uci set luci.main.lang='${LUCI_LANG}'
+          uci set luci.main.mediaurlbase='/luci-static/alpha'
+          uci commit system
+          uci commit luci
+
+          exit 0
+          EOF
+          chmod +x imagebuilder/files/etc/uci-defaults/99-custom-defaults
+
+      - name: 이미지 빌드
+        id: image_build
+        run: |
+          set -euo pipefail
+          cd imagebuilder
+
+          if [ "${OPENCLASH_FW}" = "nftables" ]; then
+            FW_PACKAGES="kmod-nft-tproxy"
+          else
+            FW_PACKAGES="iptables iptables-mod-tproxy iptables-mod-extra"
+          fi
+
+          PACKAGES="${THEME_PKG} ${THEME_CONFIG_PKG} luci-i18n-base-${LUCI_LANG} luci-mod-dashboard luci-i18n-dashboard-${LUCI_LANG} luci-compat luci-app-openclash bash dnsmasq-full curl ca-bundle ipset ip-full ruby ruby-yaml kmod-tun kmod-inet-diag unzip ${FW_PACKAGES}"
+          echo "${PACKAGES}" > ../packages-used.txt
+          make image \
+            PROFILE="${PROFILE}" \
+            PACKAGES="${PACKAGES}" \
+            FILES="files" \
+            -j"$(nproc)" V=s 2>&1 | tee ../image-build.log
+          ls -la bin/targets/*/*/
+
+      # ---------------------------------------------------------------
+      # 디버그 번들: config, feeds, repositories.conf, 빌드 로그, 버전정보 등
+      # 나중에 "왜 이 빌드가 이렇게 나왔는지" 재현/디버깅하기 위한 전체 스냅샷
+      # ---------------------------------------------------------------
+      - name: 디버그 정보 번들 생성
+        run: |
+          set -euo pipefail
+          DBG=debug-info
+          mkdir -p "${DBG}/sdk" "${DBG}/imagebuilder"
+
+          # 버전/URL 해석 결과
+          cat > "${DBG}/resolve-info.txt" <<EOF
+          version=${{ steps.resolve.outputs.version }}
+          target=${TARGET}
+          subtarget=${SUBTARGET}
+          profile=${PROFILE}
+          branch=${BRANCH}
+          arch_packages=${{ steps.repo.outputs.arch_packages }}
+          download_base=${{ steps.resolve.outputs.download_base }}
+          ib_url=${{ steps.resolve.outputs.ib_url }}
+          sdk_url=${{ steps.resolve.outputs.sdk_url }}
+          hostname=${DEVICE_HOSTNAME}
+          timezone=${DEVICE_TZ}
+          luci_lang=${LUCI_LANG}
+          openclash_fw=${OPENCLASH_FW}
+          EOF
+
+          # SDK 쪽 설정/피드 정보
+          cp -f sdk/.config "${DBG}/sdk/.config" 2>/dev/null || true
+          cp -f sdk/feeds.conf.default "${DBG}/sdk/feeds.conf.default" 2>/dev/null || true
+          cp -f feeds-update.log feeds-install.log feeds-list.log sdk-build-theme.log sdk-build-theme-config.log "${DBG}/sdk/" 2>/dev/null || true
+
+          # ImageBuilder 쪽 설정/피드/빌드 정보
+          cp -f imagebuilder/.config "${DBG}/imagebuilder/.config" 2>/dev/null || true
+          cp -f imagebuilder/repositories.conf "${DBG}/imagebuilder/repositories.conf" 2>/dev/null || true
+          cp -rf imagebuilder/files "${DBG}/imagebuilder/files" 2>/dev/null || true
+          cp -f imagebuilder/custom-packages/Packages* "${DBG}/imagebuilder/" 2>/dev/null || true
+          cp -f packages-used.txt image-build.log "${DBG}/imagebuilder/" 2>/dev/null || true
+          find imagebuilder/bin/targets -maxdepth 3 \
+            \( -iname "*.manifest" -o -iname "*buildinfo*" -o -iname "profiles.json" -o -iname "sha256sums" \) \
+            -exec cp -f {} "${DBG}/imagebuilder/" \; 2>/dev/null || true
+
+          tar -czf debug-info.tar.gz "${DBG}"
+          ls -la debug-info.tar.gz
+
+      - name: 산출물 업로드 (아티팩트)
+        uses: actions/upload-artifact@v4
+        with:
+          name: immortalwrt-${{ steps.resolve.outputs.version }}-${{ env.TARGET }}-${{ env.SUBTARGET }}-${{ env.PROFILE }}
+          path: |
+            imagebuilder/bin/targets/**
+            debug-info.tar.gz
+
+      # ---------------------------------------------------------------
+      # 4) GitHub Release 자동 생성
+      # ---------------------------------------------------------------
+      - name: 릴리스 태그 생성
+        id: tag
+        run: |
+          echo "tag=${{ steps.resolve.outputs.version }}-${TARGET}-${SUBTARGET}-${PROFILE}-$(date +%Y%m%d%H%M)" >> "$GITHUB_OUTPUT"
+
+      - name: GitHub Release 생성
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: "ImmortalWrt ${{ steps.resolve.outputs.version }} - ${{ env.PROFILE }}"
+          body: |
+            - Base: ImmortalWrt ${{ steps.resolve.outputs.version }}
+            - Target/Subtarget: ${{ env.TARGET }}/${{ env.SUBTARGET }}
+            - Profile: ${{ env.PROFILE }}
+            - Hostname: ${{ env.DEVICE_HOSTNAME }} / Timezone: ${{ env.DEVICE_TZ }} / LuCI lang: ${{ env.LUCI_LANG }}
+            - OpenClash 포함 (Smart 코어 내장 - vernesong/OpenClash core/master/smart, 대시보드: metacubexd 제거 + zashboard 커스텀 교체, firewall backend: ${{ env.OPENCLASH_FW }})
+            - debug-info.tar.gz 안에 .config / repositories.conf / feeds 로그 / 빌드 로그 / manifest·buildinfo 포함 (디버그용)
+          files: |
+            imagebuilder/bin/targets/**/*
+            debug-info.tar.gz
