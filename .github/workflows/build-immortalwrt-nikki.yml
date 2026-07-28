@@ -1,4 +1,4 @@
-name: Build ImmortalWrt (SDK + ImageBuilder)
+name: Build ImmortalWrt (SDK + ImageBuilder + nikki)
 
 on:
   workflow_dispatch:
