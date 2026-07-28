@@ -71,7 +71,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential clang flex bison g++ gawk \
             gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev \
-            python3-setuptools rsync swig unzip zlib1g-dev file wget curl zstd
+            python3-setuptools rsync swig unzip zlib1g-dev file wget curl zstd ccache
 
       # ---------------------------------------------------------------
       # 1) branch 내 최신 릴리스 버전 자동 탐색 (또는 version_pin 사용)
@@ -123,6 +123,41 @@ jobs:
             sdk.tar.zst
             imagebuilder.tar.zst
           key: immortalwrt-${{ steps.resolve.outputs.version }}-${{ env.TARGET }}-${{ env.SUBTARGET }}
+
+      # ccache: 동일/유사 소스 재컴파일 시 컴파일러 호출 결과를 재사용해 빌드 시간을 크게 줄인다.
+      # 캐시 키를 run_id로 항상 새로 만들고 restore-keys로 직전 캐시를 이어받는 방식이라
+      # 캐시가 무한정 부풀지 않으면서도(오래된 run의 캐시는 GitHub가 정리) 항상 최신 결과를 저장한다.
+      - name: ccache 캐시
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-${{ env.TARGET }}-${{ env.SUBTARGET }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-${{ env.TARGET }}-${{ env.SUBTARGET }}-
+
+      # 패키지 소스 아카이브(dl/) 캐시: feeds/패키지 컴파일 시 매번 새로 받는
+      # 업스트림 소스 tarball을 재사용한다. 버전이 바뀌어도 대부분의 소스는
+      # 그대로이므로 restore-keys로 이전 버전 캐시를 이어받는다.
+      - name: 패키지 소스(dl) 캐시
+        uses: actions/cache@v4
+        with:
+          path: sdk/dl
+          key: dl-${{ env.TARGET }}-${{ env.SUBTARGET }}-${{ steps.resolve.outputs.version }}
+          restore-keys: |
+            dl-${{ env.TARGET }}-${{ env.SUBTARGET }}-
+
+      - name: ccache 환경 설정
+        run: |
+          mkdir -p ~/.ccache
+          echo "USE_CCACHE=1" >> "$GITHUB_ENV"
+          echo "CCACHE_DIR=$HOME/.ccache" >> "$GITHUB_ENV"
+          echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+          # 컴파일 커맨드가 매번 미묘하게 달라지는 상황(타임스탬프 등)에서도
+          # 캐시 적중률을 높이기 위한 완화 옵션
+          echo "CCACHE_COMPRESS=1" >> "$GITHUB_ENV"
+          echo "CCACHE_SLOPPINESS=file_macro,time_macros,include_file_mtime,include_file_ctime,pch_defines" >> "$GITHUB_ENV"
+          ccache -M 5G
+          ccache -z
 
       # ---------------------------------------------------------------
       # 2) SDK 단계: luci-theme-alpha 컴파일 (brand.png 교체 포함) +
@@ -249,10 +284,15 @@ jobs:
           print(f"패치 완료: 기존 프리셋 {removed}줄 제거, 한국어 프리셋 1줄 삽입")
           PYEOF
 
+          # ccache 활성화 (호스트에 ccache가 설치되어 있으면 SDK가 자동으로 감지해 사용한다)
+          echo "CONFIG_CCACHE=y" >> .config
           make defconfig
           make "package/${THEME_PKG}/compile" -j"$(nproc)" V=s 2>&1 | tee ../sdk-build-theme.log
           make "package/${THEME_CONFIG_PKG}/compile" -j"$(nproc)" V=s 2>&1 | tee ../sdk-build-theme-config.log
           make "package/${NIKKI_LUCI_PKG}/compile" -j"$(nproc)" V=s 2>&1 | tee ../sdk-build-nikki-luci.log
+
+          echo "── ccache 통계 ──"
+          ccache -s || true
 
       - name: 컴파일된 커스텀 ipk 수집
         id: theme_ipk
