@@ -1,301 +1,308 @@
-name: Build ImmortalWrt for orangepi-zero3 (SDK + ImageBuilder, opkg/24.10.6)
+name: Build ImmortalWrt (SDK + ImageBuilder)
 
 on:
   workflow_dispatch:
-
-env:
-  TARGET: sunxi
-  SUBTARGET: cortexa53
-  PROFILE: xunlong_orangepi-zero3
-  # 24.10.6 release = opkg 기반 (apk 아님). apk 전환은 25.12부터.
-  DOWNLOAD_BASE: https://downloads.immortalwrt.org/releases/24.10.6/targets/sunxi/cortexa53
+    inputs:
+      target:
+        description: "타겟 (예: mediatek, sunxi)"
+        required: true
+        default: "sunxi"
+      subtarget:
+        description: "서브타겟 (예: filogic, cortexa53)"
+        required: true
+        default: "cortexa53"
+      profile:
+        description: "프로필 (예: asus_tuf-ax4200q, xunlong_orangepi-zero3)"
+        required: true
+        default: "xunlong_orangepi-zero2"
+      branch:
+        description: "추적할 마이너 릴리스 브랜치 (예: 24.10) - 이 안에서 최신 패치버전을 자동 탐색"
+        required: true
+        default: "24.10"
+      version_pin:
+        description: "특정 버전 강제 고정 (예: 24.10.5). 비워두면 branch 내 최신 자동 선택"
+        required: false
+        default: ""
+      hostname:
+        description: "장치 호스트네임"
+        required: true
+        default: "VPNBOX"
+      timezone:
+        description: "타임존 (zonename)"
+        required: true
+        default: "Asia/Shanghai"
+      luci_lang:
+        description: "LuCI 기본 언어"
+        required: true
+        default: "ko"
 
 permissions:
   contents: write
 
+env:
+  TARGET: ${{ inputs.target }}
+  SUBTARGET: ${{ inputs.subtarget }}
+  PROFILE: ${{ inputs.profile }}
+  BRANCH: ${{ inputs.branch }}
+  VERSION_PIN: ${{ inputs.version_pin }}
+  DEVICE_HOSTNAME: ${{ inputs.hostname }}
+  DEVICE_TZ: ${{ inputs.timezone }}
+  LUCI_LANG: ${{ inputs.luci_lang }}
+  THEME_REPO: https://github.com/derisamedia/luci-theme-alpha
+  THEME_PKG: luci-theme-alpha
+  BRAND_URL: https://raw.githubusercontent.com/hckwon767/tuf4200q/refs/heads/main/brand.png
+  NIKKI_PAGES: https://nikkinikki.pages.dev
+
 jobs:
-  # ──────────────────────────────────────────────
-  # JOB 1: SDK로 커스텀 패키지 컴파일 (bandix, alpha 테마)
-  # OpenClash는 공식 사전 빌드 ipk 사용
-  #   → 소스에서 빌드하면 ruby → libffi 의존성 체인이 걸리는데,
-  #     aarch64_cortex-a53/musl 조합에서 libffi-3.4.7 패키징 단계가
-  #     fficonfig.h 경로를 못 찾아 실패하는 SDK 자체의 알려진 버그가 있음
-  #     (openwrt/openwrt#18035, #18041). 그래서 공식 ipk를 받고,
-  #     쓰지 않는 metacubexd UI만 ipk를 언팩해서 제거.
-  # ──────────────────────────────────────────────
-  build-custom-packages:
-    runs-on: ubuntu-22.04
+  build:
+    runs-on: ubuntu-24.04
     steps:
-      - name: Free Disk Space
-        uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: true
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: true
-          docker-images: true
-          swift: true
-
-      - name: Install Build Tools
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential clang flex bison gawk rsync gettext \
-            git libncurses5-dev libssl-dev python3-distutils zlib1g-dev file wget \
-            unzip python3-setuptools python3-pyelftools zstd jq binutils
-
-      - name: Resolve & Download SDK
-        run: |
-          curl -sL "${DOWNLOAD_BASE}/sha256sums" -o sha256sums
-          SDK_FILE=$(grep -oE 'immortalwrt-sdk-[^ ]*\.tar\.zst' sha256sums | head -n1)
-          echo "SDK_FILE=$SDK_FILE" >> $GITHUB_ENV
-          echo "Resolved SDK: $SDK_FILE"
-          curl -L --retry 3 --fail "${DOWNLOAD_BASE}/${SDK_FILE}" -o sdk.tar.zst
-          mkdir sdk && tar --use-compress-program=unzstd -xf sdk.tar.zst -C sdk --strip-components=1
-
-      - name: Add Custom Package Sources
-        run: |
-          cd sdk
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
-
-          # Alpha 테마 + 필수 종속 패키지
-          rm -rf package/luci-theme-alpha package/luci-app-alpha-config
-          git clone --depth 1 https://github.com/derisamedia/luci-theme-alpha package/luci-theme-alpha
-          git clone --depth 1 https://github.com/animegasan/luci-app-alpha-config package/luci-app-alpha-config
-
-          # brand.png 교체 (상단바 + 로그인화면)
-          curl -L --retry 3 --fail \
-            "https://raw.githubusercontent.com/hckwon767/tuf4200q/refs/heads/main/brand.png" \
-            -o /tmp/brand.png
-          cp /tmp/brand.png package/luci-theme-alpha/luasrc/brand.png
-          cp /tmp/brand.png package/luci-theme-alpha/luasrc/style/brand.png
-
-          # Bandix
-          rm -rf package/luci-app-bandix package/openwrt-bandix
-          git clone --depth 1 https://github.com/timsaya/luci-app-bandix package/luci-app-bandix
-          git clone --depth 1 https://github.com/timsaya/openwrt-bandix package/openwrt-bandix
-
-      - name: Compile Custom Packages Only (bandix, alpha 테마만)
-        run: |
-          cd sdk
-          make defconfig
-          make package/luci-app-bandix/compile V=s -j$(nproc)
-          make package/openwrt-bandix/compile V=s -j$(nproc)
-          make package/luci-theme-alpha/compile V=s -j$(nproc)
-          make package/luci-app-alpha-config/compile V=s -j$(nproc)
-
-      - name: Download & Repack Official OpenClash (ipk, metacubexd 제거)
-        run: |
-          mkdir -p /tmp/custom-packages /tmp/openclash-repack
-          curl -sL --retry 2 "https://api.github.com/repos/vernesong/OpenClash/releases/latest" \
-            -o /tmp/openclash_release.json
-
-          # opkg(ipk) 기반이므로 apk가 아닌 ipk 자산을 받는다 (metacubexd/dashboard 등 all-arch 공용)
-          DOWNLOAD_URL=$(jq -r '.assets[].browser_download_url' /tmp/openclash_release.json | grep '\.ipk$' | head -n1)
-
-          if [ -z "$DOWNLOAD_URL" ]; then
-            echo "::error::OpenClash ipk 릴리즈를 찾지 못했습니다"
-            exit 1
-          fi
-
-          FILENAME=$(basename "$DOWNLOAD_URL")
-          echo "Resolved OpenClash URL: $DOWNLOAD_URL"
-          curl -L --retry 3 --fail -o "/tmp/openclash-repack/${FILENAME}" "$DOWNLOAD_URL"
-
-          # ── ipk는 ar 아카이브(debian-binary, control.tar.gz, data.tar.gz)이므로
-          #    SDK 재빌드 없이 data.tar.gz만 열어서 metacubexd UI를 제거하고 재포장
-          cd /tmp/openclash-repack
-          ar x "${FILENAME}"
-          mkdir -p data_extract
-          tar -xzf data.tar.gz -C data_extract
-          rm -rf data_extract/usr/share/openclash/ui/metacubexd
-          rm -f data.tar.gz
-          tar -C data_extract -czf data.tar.gz .
-          rm -f "${FILENAME}"
-          ar rc "${FILENAME}" debian-binary control.tar.gz data.tar.gz
-
-          cp -v "${FILENAME}" /tmp/custom-packages/
-
-      - name: Collect Built Packages
-        run: |
-          find sdk/bin/packages -type f -name "*.ipk" \
-            \( -iname "*bandix*" -o -iname "*alpha*" \) \
-            -exec cp -v {} /tmp/custom-packages/ \;
-          ls -la /tmp/custom-packages/
-          tar -czf custom-packages.tar.gz -C /tmp custom-packages
-
-      - name: Upload Custom Packages Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: custom-packages
-          path: custom-packages.tar.gz
-          retention-days: 1
-
-  # ──────────────────────────────────────────────
-  # JOB 2: ImageBuilder로 최종 이미지 조립
-  # ──────────────────────────────────────────────
-  build-image:
-    needs: build-custom-packages
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Checkout Repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Build Tools
-        env:
-          DEBIAN_FRONTEND: noninteractive
+      - name: 호스트 빌드 의존성 설치
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential gawk file wget unzip python3 zstd curl
+          sudo apt-get install -y build-essential clang flex bison g++ gawk \
+            gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev \
+            python3-setuptools rsync swig unzip zlib1g-dev file wget curl \
+            zstd opkg-utils
 
-      - name: Download Custom Packages Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: custom-packages
-
-      - name: Extract Custom Packages
+      # ---------------------------------------------------------------
+      # 1) branch 내 최신 릴리스 버전 자동 탐색 (또는 version_pin 사용)
+      # ---------------------------------------------------------------
+      - name: 최신 릴리스 버전 및 SDK/ImageBuilder 파일명 자동 탐색
+        id: resolve
         run: |
-          tar -xzf custom-packages.tar.gz
+          set -euo pipefail
 
-      - name: Resolve & Download ImageBuilder
-        run: |
-          curl -sL "${DOWNLOAD_BASE}/sha256sums" -o sha256sums
-          IB_FILE=$(grep -oE 'immortalwrt-imagebuilder-[^ ]*\.tar\.zst' sha256sums | head -n1)
+          if [ -n "${VERSION_PIN}" ]; then
+            VERSION="${VERSION_PIN}"
+            echo "버전 강제 고정: ${VERSION}"
+          else
+            INDEX_HTML=$(curl -fsSL "https://downloads.immortalwrt.org/releases/")
+            VERSION=$(echo "${INDEX_HTML}" \
+              | grep -oE "href=\"${BRANCH}\.[0-9]+/\"" \
+              | sed -E 's/href="(.*)\/"/\1/' \
+              | sort -V | tail -n1)
+            if [ -z "${VERSION}" ]; then
+              echo "::error::${BRANCH} 브랜치에서 릴리스 버전을 찾지 못했습니다."
+              exit 1
+            fi
+            echo "자동 선택된 최신 버전: ${VERSION}"
+          fi
 
-          if [ -z "$IB_FILE" ]; then
-            echo "::error::ImageBuilder 바이너리를 sha256sums에서 찾을 수 없습니다"
+          DOWNLOAD_BASE="https://downloads.immortalwrt.org/releases/${VERSION}/targets/${TARGET}/${SUBTARGET}"
+          PAGE=$(curl -fsSL "${DOWNLOAD_BASE}/")
+
+          IB_FILE=$(echo "${PAGE}" | grep -oE "immortalwrt-imagebuilder-[^\"]+\.tar\.zst" | head -n1)
+          SDK_FILE=$(echo "${PAGE}" | grep -oE "immortalwrt-sdk-[^\"]+\.tar\.zst" | head -n1)
+
+          if [ -z "${IB_FILE}" ] || [ -z "${SDK_FILE}" ]; then
+            echo "::error::${TARGET}/${SUBTARGET} 용 ImageBuilder/SDK 파일을 ${VERSION}에서 찾지 못했습니다."
+            echo "${PAGE}"
             exit 1
           fi
 
-          echo "IB_FILE=$IB_FILE" >> $GITHUB_ENV
-          echo "Resolved ImageBuilder: $IB_FILE"
-          curl -L --retry 3 --fail "${DOWNLOAD_BASE}/${IB_FILE}" -o imagebuilder.tar.zst
-          mkdir -p imagebuilder && tar --use-compress-program=unzstd -xf imagebuilder.tar.zst -C imagebuilder --strip-components=1
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "download_base=${DOWNLOAD_BASE}" >> "$GITHUB_OUTPUT"
+          echo "ib_file=${IB_FILE}" >> "$GITHUB_OUTPUT"
+          echo "sdk_file=${SDK_FILE}" >> "$GITHUB_OUTPUT"
+          echo "ib_url=${DOWNLOAD_BASE}/${IB_FILE}" >> "$GITHUB_OUTPUT"
+          echo "sdk_url=${DOWNLOAD_BASE}/${SDK_FILE}" >> "$GITHUB_OUTPUT"
 
-      - name: Register Custom Package Repo
+      - name: 다운로드 캐시
+        uses: actions/cache@v4
+        with:
+          path: |
+            sdk.tar.zst
+            imagebuilder.tar.zst
+          key: immortalwrt-${{ steps.resolve.outputs.version }}-${{ env.TARGET }}-${{ env.SUBTARGET }}
+
+      # ---------------------------------------------------------------
+      # 2) SDK 단계: luci-theme-alpha 컴파일 (brand.png 교체 포함)
+      #    nikki는 자체 opkg 피드(nikkinikki.pages.dev)를 제공하므로
+      #    SDK에서 소스 빌드하지 않고 ImageBuilder 단계에서 피드로 추가한다.
+      # ---------------------------------------------------------------
+      - name: SDK 다운로드 및 압축 해제
         run: |
+          set -euo pipefail
+          [ -f sdk.tar.zst ] || curl -fsSL -o sdk.tar.zst "${{ steps.resolve.outputs.sdk_url }}"
+          mkdir -p sdk
+          tar --use-compress-program=unzstd -xf sdk.tar.zst -C sdk --strip-components=1
+
+      - name: luci-theme-alpha 소스 가져오기 + brand.png 교체
+        run: |
+          set -euo pipefail
+          rm -rf "sdk/package/${THEME_PKG}"
+          git clone --depth 1 "${THEME_REPO}" "sdk/package/${THEME_PKG}"
+
+          curl -L --retry 3 --fail "${BRAND_URL}" -o /tmp/brand.png
+
+          # brand.png가 실제 위치할 수 있는 모든 경로에 적용 (테마 버전에 따라 경로가 다를 수 있음)
+          cp -f /tmp/brand.png "sdk/package/${THEME_PKG}/luasrc/brand.png" || true
+          cp -f /tmp/brand.png "sdk/package/${THEME_PKG}/luasrc/style/brand.png" || true
+          find "sdk/package/${THEME_PKG}" -type f -iname "brand.png" -exec cp -f /tmp/brand.png {} \;
+
+      - name: SDK feeds 업데이트/설치 및 테마 패키지 컴파일
+        run: |
+          set -euo pipefail
+          cd sdk
+          ./scripts/feeds update -a 2>&1 | tee ../feeds-update.log
+          ./scripts/feeds install -a 2>&1 | tee ../feeds-install.log
+          ./scripts/feeds list -s > ../feeds-list.log || true
+          make defconfig
+          make "package/${THEME_PKG}/compile" -j"$(nproc)" V=s 2>&1 | tee ../sdk-build-theme.log
+
+      - name: 컴파일된 테마 ipk 수집
+        id: theme_ipk
+        run: |
+          set -euo pipefail
+          mkdir -p custom-packages
+          find sdk/bin/packages -iname "${THEME_PKG}*.ipk" -exec cp -f {} custom-packages/ \;
+          ls -la custom-packages/
+
+      # ---------------------------------------------------------------
+      # 3) ImageBuilder 단계
+      # ---------------------------------------------------------------
+      - name: ImageBuilder 다운로드 및 압축 해제
+        run: |
+          set -euo pipefail
+          [ -f imagebuilder.tar.zst ] || curl -fsSL -o imagebuilder.tar.zst "${{ steps.resolve.outputs.ib_url }}"
+          mkdir -p imagebuilder
+          tar --use-compress-program=unzstd -xf imagebuilder.tar.zst -C imagebuilder --strip-components=1
+
+      - name: 아키텍처 판별 및 로컬/nikki 피드 등록
+        id: repo
+        run: |
+          set -euo pipefail
           cd imagebuilder
 
-          # opkg 기반 ImageBuilder는 기본적으로 repositories.conf에
-          #   src imagebuilder file:packages
-          # 항목이 이미 등록되어 있고, ./packages 폴더에 넣은 .ipk는
-          # make image 실행 시 자동으로 재인덱싱(Packages/Packages.gz 생성 및
-          # 로컬 키로 서명)됩니다. apk 때처럼 별도 mkndx/서명 작업이 필요 없습니다.
-          mkdir -p packages
-          cp -v ../custom-packages/*.ipk packages/ 2>/dev/null || true
+          ARCH_PACKAGES=$(grep -oP '(?<=CONFIG_TARGET_ARCH_PACKAGES=")[^"]+' .config)
+          echo "arch_packages=${ARCH_PACKAGES}" >> "$GITHUB_OUTPUT"
+          echo "판별된 아키텍처: ${ARCH_PACKAGES}"
 
-          echo "── repositories.conf ──"
+          NIKKI_BRANCH="openwrt-${BRANCH}"
+          NIKKI_FEED_URL="${NIKKI_PAGES}/${NIKKI_BRANCH}/${ARCH_PACKAGES}/nikki"
+
+          mkdir -p custom-packages
+          cp -f ../custom-packages/*.ipk custom-packages/ 2>/dev/null || true
+          opkg-make-index custom-packages > custom-packages/Packages
+          gzip -9nk -f custom-packages/Packages
+
+          # 서명 확인 비활성화: 로컬 커스텀 피드 + 제3자(nikki) 피드를 쓰기 위한 트레이드오프.
+          # 필요 시 nikki의 key-build.pub / usign 키를 keys/ 에 추가하고 이 줄을 유지하는 방식으로 강화 가능.
+          sed -i '/option check_signature/d' repositories.conf
+
+          {
+            echo "src/gzip custom file://$(pwd)/custom-packages"
+            echo "src/gzip nikki ${NIKKI_FEED_URL}"
+          } | cat - repositories.conf > repositories.conf.new
+          mv repositories.conf.new repositories.conf
+
           cat repositories.conf
-          echo "── 커스텀 패키지 목록 (packages/) ──"
-          ls -la packages/
 
-      - name: Prepare Custom Files Overlay
+      - name: 부팅시 기본값(uci-defaults) 생성
         run: |
+          set -euo pipefail
           mkdir -p imagebuilder/files/etc/uci-defaults
-          mkdir -p imagebuilder/files/etc/openclash/core
-
-          # UCI 기본값 설정
-          cat << 'EOF' > imagebuilder/files/etc/uci-defaults/99-custom
-          uci set system.@system[0].hostname='ASUS_VPNBOX'
-          uci set luci.main.lang='ko'
+          cat > imagebuilder/files/etc/uci-defaults/99-custom-defaults <<EOF
+          #!/bin/sh
+          uci set system.@system[0].hostname='${DEVICE_HOSTNAME}'
+          uci set system.@system[0].zonename='${DEVICE_TZ}'
+          uci set luci.main.lang='${LUCI_LANG}'
           uci set luci.main.mediaurlbase='/luci-static/alpha'
+          uci commit system
           uci commit luci
-
-          uci set firewall.@defaults[0].flow_offloading='1'
-          uci set firewall.@defaults[0].flow_offloading_hw='1'
-          uci commit firewall
           exit 0
           EOF
-          chmod +x imagebuilder/files/etc/uci-defaults/99-custom
+          chmod +x imagebuilder/files/etc/uci-defaults/99-custom-defaults
 
-          # OpenClash Smart Core 사전 내장
-          curl -L --retry 3 --fail \
-            "https://raw.githubusercontent.com/vernesong/OpenClash/core/master/smart/clash-linux-arm64.tar.gz" \
-            -o /tmp/clash-arm64.tar.gz
-          tar -xzf /tmp/clash-arm64.tar.gz -C /tmp
-          cp /tmp/clash imagebuilder/files/etc/openclash/core/clash_meta
-          chmod +x imagebuilder/files/etc/openclash/core/clash_meta
-
-          # zashboard 한국어 패치 (metacubexd 대체용 대시보드 UI)
-          mkdir -p imagebuilder/files/usr/share/openclash/ui/zashboard
-          curl -L --retry 3 --fail \
-            "https://github.com/hckwon767/dashboard-ko/releases/download/v3.15.0/zashboard-ko.zip" \
-            -o /tmp/zashboard-ko.zip
-          unzip -q /tmp/zashboard-ko.zip -d /tmp/dashboard-ko-extract
-          cp -a /tmp/dashboard-ko-extract/. imagebuilder/files/usr/share/openclash/ui/zashboard/ 2>/dev/null || true
-
-      - name: Build Image
+      - name: 이미지 빌드
+        id: image_build
         run: |
+          set -euo pipefail
           cd imagebuilder
-          make image PROFILE="${PROFILE}" \
-            PACKAGES="\
-              luci luci-base \
-              luci-theme-argon luci-theme-alpha luci-app-alpha-config \
-              default-settings-chn \
-              luci-i18n-base-ko luci-i18n-firewall-ko luci-i18n-ttyd-ko \
-              luci-i18n-hd-idle-ko luci-i18n-upnp-ko luci-i18n-sqm-ko \
-              luci-i18n-attendedsysupgrade-ko luci-i18n-dashboard-ko luci-i18n-ddns-ko \
-              luci-app-package-manager luci-i18n-package-manager-ko \
-              luci-mod-dashboard luci-app-ttyd luci-app-attendedsysupgrade \
-              luci-app-upnp luci-app-sqm htop nano irqbalance \
-              vsftpd luci-app-ddns ddns-scripts \
-              luci-app-openclash kmod-tun ruby ruby-yaml ruby-psych ruby-pstore \
-              kmod-inet-diag unzip luci-compat \
-              -dnsmasq dnsmasq-full \
-              coreutils coreutils-nohup bash curl wget-ssl ca-certificates ca-bundle \
-              ipset ip-full iptables iptables-nft iptables-mod-tproxy iptables-mod-extra \
-              kmod-ipt-tproxy kmod-nft-tproxy jq jsonfilter \
-              lm-sensors collectd-mod-sensors collectd kmod-usb3 kmod-usb-storage \
-              kmod-nft-offload \
-              luci-app-bandix \
-              block-mount automount kmod-fs-ext4 kmod-fs-vfat kmod-fs-exfat \
-              kmod-nls-cp437 kmod-nls-utf8 kmod-fs-ntfs3 \
-              zram-swap \
-              ethtool iperf3 libiperf3 usbutils usbids kmod-usb-printer \
-              smartmontools smartmontools-drivedb hd-idle luci-app-hd-idle luci-app-diskman \
-            " \
+          PACKAGES="${THEME_PKG} luci-i18n-base-${LUCI_LANG} luci-mod-dashboard luci-i18n-dashboard-${LUCI_LANG} nikki luci-app-nikki"
+          echo "${PACKAGES}" > ../packages-used.txt
+          make image \
+            PROFILE="${PROFILE}" \
+            PACKAGES="${PACKAGES}" \
             FILES="files" \
-            EXTRA_IMAGE_NAME="ko-custom"
+            -j"$(nproc)" V=s 2>&1 | tee ../image-build.log
+          ls -la bin/targets/*/*/
 
-      - name: Prepare Artifacts for Release
-        id: organize
+      # ---------------------------------------------------------------
+      # 디버그 번들: config, feeds, repositories.conf, 빌드 로그, 버전정보 등
+      # 나중에 "왜 이 빌드가 이렇게 나왔는지" 재현/디버깅하기 위한 전체 스냅샷
+      # ---------------------------------------------------------------
+      - name: 디버그 정보 번들 생성
         run: |
-          cd "imagebuilder/bin/targets/${TARGET}/${SUBTARGET}"
-          echo "── 빌드 결과물 전체 목록 ──"
-          ls -la
+          set -euo pipefail
+          DBG=debug-info
+          mkdir -p "${DBG}/sdk" "${DBG}/imagebuilder"
 
-          mkdir -p /tmp/release_files
+          # 버전/URL 해석 결과
+          cat > "${DBG}/resolve-info.txt" <<EOF
+          version=${{ steps.resolve.outputs.version }}
+          target=${TARGET}
+          subtarget=${SUBTARGET}
+          profile=${PROFILE}
+          branch=${BRANCH}
+          arch_packages=${{ steps.repo.outputs.arch_packages }}
+          download_base=${{ steps.resolve.outputs.download_base }}
+          ib_url=${{ steps.resolve.outputs.ib_url }}
+          sdk_url=${{ steps.resolve.outputs.sdk_url }}
+          hostname=${DEVICE_HOSTNAME}
+          timezone=${DEVICE_TZ}
+          luci_lang=${LUCI_LANG}
+          EOF
 
-          # 요청된 3종 이미지 (ext4 / squashfs sdcard + initramfs kernel)
-          # xunlong_orangepi-zero3 프로필은 기본적으로 ext4/squashfs 둘 다 빌드됨
-          cp -av *ext4-sdcard.img.gz        /tmp/release_files/ 2>/dev/null || echo "::warning::ext4-sdcard.img.gz 없음"
-          cp -av *squashfs-sdcard.img.gz    /tmp/release_files/ 2>/dev/null || echo "::warning::squashfs-sdcard.img.gz 없음"
-          cp -av *initramfs-kernel.bin      /tmp/release_files/ 2>/dev/null || echo "::warning::initramfs-kernel.bin 없음"
+          # SDK 쪽 설정/피드 정보
+          cp -f sdk/.config "${DBG}/sdk/.config" 2>/dev/null || true
+          cp -f sdk/feeds.conf.default "${DBG}/sdk/feeds.conf.default" 2>/dev/null || true
+          cp -f feeds-update.log feeds-install.log feeds-list.log sdk-build-theme.log "${DBG}/sdk/" 2>/dev/null || true
 
-          # manifest / config / feeds 메타데이터
-          cp -av *.manifest        /tmp/release_files/ 2>/dev/null || true
-          cp -av config.buildinfo  /tmp/release_files/ 2>/dev/null || true
-          cp -av feeds.buildinfo   /tmp/release_files/ 2>/dev/null || true
-          cp -av version.buildinfo /tmp/release_files/ 2>/dev/null || true
-          cp -av sha256sums        /tmp/release_files/ 2>/dev/null || true
+          # ImageBuilder 쪽 설정/피드/빌드 정보
+          cp -f imagebuilder/.config "${DBG}/imagebuilder/.config" 2>/dev/null || true
+          cp -f imagebuilder/repositories.conf "${DBG}/imagebuilder/repositories.conf" 2>/dev/null || true
+          cp -rf imagebuilder/files "${DBG}/imagebuilder/files" 2>/dev/null || true
+          cp -f imagebuilder/custom-packages/Packages* "${DBG}/imagebuilder/" 2>/dev/null || true
+          cp -f packages-used.txt image-build.log "${DBG}/imagebuilder/" 2>/dev/null || true
+          find imagebuilder/bin/targets -maxdepth 3 \
+            \( -iname "*.manifest" -o -iname "*buildinfo*" -o -iname "profiles.json" -o -iname "sha256sums" \) \
+            -exec cp -f {} "${DBG}/imagebuilder/" \; 2>/dev/null || true
 
-          echo "── 릴리즈에 포함될 파일 ──"
-          ls -la /tmp/release_files/
+          tar -czf debug-info.tar.gz "${DBG}"
+          ls -la debug-info.tar.gz
 
-          TAG_NAME="ImmortalWrt-orangepi-zero3-$(date +'%Y.%m.%d-%H%M')"
-          echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
-          echo "RELEASE_PATH=/tmp/release_files" >> $GITHUB_OUTPUT
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+      - name: 산출물 업로드 (아티팩트)
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: ${{ env.TAG_NAME }}
-          name: ImmortalWrt Release ${{ env.TAG_NAME }}
-          files: ${{ steps.organize.outputs.RELEASE_PATH }}/*
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: immortalwrt-${{ steps.resolve.outputs.version }}-${{ env.TARGET }}-${{ env.SUBTARGET }}-${{ env.PROFILE }}
+          path: |
+            imagebuilder/bin/targets/**
+            debug-info.tar.gz
+
+      # ---------------------------------------------------------------
+      # 4) GitHub Release 자동 생성
+      # ---------------------------------------------------------------
+      - name: 릴리스 태그 생성
+        id: tag
+        run: |
+          echo "tag=${{ steps.resolve.outputs.version }}-${TARGET}-${SUBTARGET}-${PROFILE}-$(date +%Y%m%d%H%M)" >> "$GITHUB_OUTPUT"
+
+      - name: GitHub Release 생성
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: "ImmortalWrt ${{ steps.resolve.outputs.version }} - ${{ env.PROFILE }}"
+          body: |
+            - Base: ImmortalWrt ${{ steps.resolve.outputs.version }}
+            - Target/Subtarget: ${{ env.TARGET }}/${{ env.SUBTARGET }}
+            - Profile: ${{ env.PROFILE }}
+            - Hostname: ${{ env.DEVICE_HOSTNAME }} / Timezone: ${{ env.DEVICE_TZ }} / LuCI lang: ${{ env.LUCI_LANG }}
+            - debug-info.tar.gz 안에 .config / repositories.conf / feeds 로그 / 빌드 로그 / manifest·buildinfo 포함 (디버그용)
+          files: |
+            imagebuilder/bin/targets/**/*
+            debug-info.tar.gz
