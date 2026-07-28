@@ -15,8 +15,13 @@ permissions:
 
 jobs:
   # ──────────────────────────────────────────────
-  # JOB 1: SDK로 커스텀 패키지 컴파일 (bandix, alpha 테마, OpenClash)
-  # opkg 방식이므로 OpenClash도 apk 공식 릴리즈 대신 소스에서 직접 빌드
+  # JOB 1: SDK로 커스텀 패키지 컴파일 (bandix, alpha 테마)
+  # OpenClash는 공식 사전 빌드 ipk 사용
+  #   → 소스에서 빌드하면 ruby → libffi 의존성 체인이 걸리는데,
+  #     aarch64_cortex-a53/musl 조합에서 libffi-3.4.7 패키징 단계가
+  #     fficonfig.h 경로를 못 찾아 실패하는 SDK 자체의 알려진 버그가 있음
+  #     (openwrt/openwrt#18035, #18041). 그래서 공식 ipk를 받고,
+  #     쓰지 않는 metacubexd UI만 ipk를 언팩해서 제거.
   # ──────────────────────────────────────────────
   build-custom-packages:
     runs-on: ubuntu-22.04
@@ -39,7 +44,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential clang flex bison gawk rsync gettext \
             git libncurses5-dev libssl-dev python3-distutils zlib1g-dev file wget \
-            unzip python3-setuptools python3-pyelftools zstd jq
+            unzip python3-setuptools python3-pyelftools zstd jq binutils
 
       - name: Resolve & Download SDK
         run: |
@@ -73,17 +78,7 @@ jobs:
           git clone --depth 1 https://github.com/timsaya/luci-app-bandix package/luci-app-bandix
           git clone --depth 1 https://github.com/timsaya/openwrt-bandix package/openwrt-bandix
 
-          # ── OpenClash: opkg 방식으로 전환하면서 공식 apk 릴리즈 다운로드 대신
-          #    소스에서 직접 luci-app-openclash를 빌드 (ipk 산출)
-          rm -rf package/luci-app-openclash
-          git clone --depth 1 https://github.com/vernesong/OpenClash.git /tmp/OpenClash-src
-          mkdir -p package/luci-app-openclash
-          cp -a /tmp/OpenClash-src/luci-app-openclash/. package/luci-app-openclash/
-
-          # zashboard-ko만 사용하므로, 패키지에 기본 내장된 metacubexd UI는 제거
-          rm -rf package/luci-app-openclash/root/usr/share/openclash/ui/metacubexd
-
-      - name: Compile Custom Packages Only (bandix, alpha 테마, openclash)
+      - name: Compile Custom Packages Only (bandix, alpha 테마만)
         run: |
           cd sdk
           make defconfig
@@ -91,14 +86,43 @@ jobs:
           make package/openwrt-bandix/compile V=s -j$(nproc)
           make package/luci-theme-alpha/compile V=s -j$(nproc)
           make package/luci-app-alpha-config/compile V=s -j$(nproc)
-          make package/luci-app-openclash/compile V=s -j$(nproc) || \
-          make package/luci-app-openclash/compile V=s -j1
+
+      - name: Download & Repack Official OpenClash (ipk, metacubexd 제거)
+        run: |
+          mkdir -p /tmp/custom-packages /tmp/openclash-repack
+          curl -sL --retry 2 "https://api.github.com/repos/vernesong/OpenClash/releases/latest" \
+            -o /tmp/openclash_release.json
+
+          # opkg(ipk) 기반이므로 apk가 아닌 ipk 자산을 받는다 (metacubexd/dashboard 등 all-arch 공용)
+          DOWNLOAD_URL=$(jq -r '.assets[].browser_download_url' /tmp/openclash_release.json | grep '\.ipk$' | head -n1)
+
+          if [ -z "$DOWNLOAD_URL" ]; then
+            echo "::error::OpenClash ipk 릴리즈를 찾지 못했습니다"
+            exit 1
+          fi
+
+          FILENAME=$(basename "$DOWNLOAD_URL")
+          echo "Resolved OpenClash URL: $DOWNLOAD_URL"
+          curl -L --retry 3 --fail -o "/tmp/openclash-repack/${FILENAME}" "$DOWNLOAD_URL"
+
+          # ── ipk는 ar 아카이브(debian-binary, control.tar.gz, data.tar.gz)이므로
+          #    SDK 재빌드 없이 data.tar.gz만 열어서 metacubexd UI를 제거하고 재포장
+          cd /tmp/openclash-repack
+          ar x "${FILENAME}"
+          mkdir -p data_extract
+          tar -xzf data.tar.gz -C data_extract
+          rm -rf data_extract/usr/share/openclash/ui/metacubexd
+          rm -f data.tar.gz
+          tar -C data_extract -czf data.tar.gz .
+          rm -f "${FILENAME}"
+          ar rc "${FILENAME}" debian-binary control.tar.gz data.tar.gz
+
+          cp -v "${FILENAME}" /tmp/custom-packages/
 
       - name: Collect Built Packages
         run: |
-          mkdir -p /tmp/custom-packages
           find sdk/bin/packages -type f -name "*.ipk" \
-            \( -iname "*bandix*" -o -iname "*alpha*" -o -iname "*openclash*" \) \
+            \( -iname "*bandix*" -o -iname "*alpha*" \) \
             -exec cp -v {} /tmp/custom-packages/ \;
           ls -la /tmp/custom-packages/
           tar -czf custom-packages.tar.gz -C /tmp custom-packages
