@@ -27,14 +27,6 @@ on:
         description: "장치 호스트네임"
         required: true
         default: "ASUS_VPNBOX"
-      timezone:
-        description: "타임존 (zonename)"
-        required: true
-        default: "Asia/Shanghai"
-      luci_lang:
-        description: "LuCI 기본 언어"
-        required: true
-        default: "ko"
 
 permissions:
   contents: write
@@ -46,13 +38,13 @@ env:
   BRANCH: ${{ inputs.branch }}
   VERSION_PIN: ${{ inputs.version_pin }}
   DEVICE_HOSTNAME: ${{ inputs.hostname }}
-  DEVICE_TZ: ${{ inputs.timezone }}
-  LUCI_LANG: ${{ inputs.luci_lang }}
+  DEVICE_TZ: "Asia/Shanghai"
+  LUCI_LANG: "ko"
   THEME_REPO: https://github.com/derisamedia/luci-theme-alpha
   THEME_PKG: luci-theme-alpha
   THEME_CONFIG_REPO: https://github.com/animegasan/luci-app-alpha-config
   THEME_CONFIG_PKG: luci-app-alpha-config
-  BRAND_URL: https://raw.githubusercontent.com/hckwon767/tuf4200q/refs/heads/main/brand.png
+  BRAND_BASE_URL: https://raw.githubusercontent.com/hckwon767/immwrt_builder/refs/heads/main
   NIKKI_PAGES: https://nikkinikki.pages.dev
   NIKKI_REPO: https://github.com/nikkinikki-org/OpenWrt-nikki.git
   NIKKI_LUCI_PKG: luci-app-nikki
@@ -196,6 +188,20 @@ jobs:
           set -euo pipefail
           rm -rf "sdk/package/${THEME_PKG}"
           git clone --depth 1 "${THEME_REPO}" "sdk/package/${THEME_PKG}"
+
+          # PROFILE 전용 브랜드 이미지(${PROFILE}.png)가 있으면 그것을 사용하고,
+          # 없으면(404 등) 기본 brand.png로 폴백한다.
+          PROFILE_BRAND_URL="${BRAND_BASE_URL}/${PROFILE}.png"
+          DEFAULT_BRAND_URL="${BRAND_BASE_URL}/brand.png"
+
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${PROFILE_BRAND_URL}")
+          if [ "${HTTP_CODE}" = "200" ]; then
+            BRAND_URL="${PROFILE_BRAND_URL}"
+            echo "프로필 전용 브랜드 이미지 사용: ${BRAND_URL}"
+          else
+            BRAND_URL="${DEFAULT_BRAND_URL}"
+            echo "프로필 전용 브랜드 이미지(${PROFILE_BRAND_URL})를 찾지 못해(HTTP ${HTTP_CODE}) 기본값 사용: ${BRAND_URL}"
+          fi
 
           curl -L --retry 3 --fail "${BRAND_URL}" -o /tmp/brand.png
 
