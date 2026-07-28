@@ -1,4 +1,4 @@
-name: Build ImmortalWrt (SDK + ImageBuilder)
+name: openclash+Build ImmortalWrt (SDK + ImageBuilder)
 
 on:
   workflow_dispatch:
