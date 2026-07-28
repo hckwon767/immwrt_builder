@@ -52,6 +52,10 @@ env:
   THEME_PKG: luci-theme-alpha
   BRAND_URL: https://raw.githubusercontent.com/hckwon767/tuf4200q/refs/heads/main/brand.png
   NIKKI_PAGES: https://nikkinikki.pages.dev
+  NIKKI_REPO: https://github.com/nikkinikki-org/OpenWrt-nikki.git
+  NIKKI_LUCI_PKG: luci-app-nikki
+  DASHBOARD_KO_URL: https://github.com/hckwon767/dashboard-ko/releases/latest/download/zashboard-ko.zip
+  DASHBOARD_KO_LABEL: "Zashboard (한국어)"
 
 jobs:
   build:
@@ -119,9 +123,11 @@ jobs:
           key: immortalwrt-${{ steps.resolve.outputs.version }}-${{ env.TARGET }}-${{ env.SUBTARGET }}
 
       # ---------------------------------------------------------------
-      # 2) SDK 단계: luci-theme-alpha 컴파일 (brand.png 교체 포함)
-      #    nikki는 자체 opkg 피드(nikkinikki.pages.dev)를 제공하므로
-      #    SDK에서 소스 빌드하지 않고 ImageBuilder 단계에서 피드로 추가한다.
+      # 2) SDK 단계: luci-theme-alpha 컴파일 (brand.png 교체 포함) +
+      #    luci-app-nikki 컴파일 (한국어 대시보드 프리셋 패치 포함)
+      #    nikki 코어(mihomo, Rust)는 자체 opkg 피드(nikkinikki.pages.dev)를
+      #    그대로 쓰고, luci-app-nikki는 Lua/JS라 가벼우므로 SDK에서 직접
+      #    소스를 패치해서 컴파일한다.
       # ---------------------------------------------------------------
       - name: SDK 다운로드 및 압축 해제
         run: |
@@ -161,22 +167,98 @@ jobs:
           cp -f /tmp/brand.png "sdk/package/${THEME_PKG}/luasrc/style/brand.png" || true
           find "sdk/package/${THEME_PKG}" -type f -iname "brand.png" -exec cp -f /tmp/brand.png {} \;
 
-      - name: SDK feeds 업데이트/설치 및 테마 패키지 컴파일
+      - name: nikki 피드 등록
+        run: |
+          set -euo pipefail
+          # luci-app-nikki 소스를 받기 위해 SDK feeds.conf.default에 등록
+          # (nikki 코어 자체는 컴파일하지 않고 nikkinikki.pages.dev 프리빌트 피드를 그대로 사용)
+          echo "src-git nikki ${NIKKI_REPO};main" >> sdk/feeds.conf.default
+          cat sdk/feeds.conf.default
+
+      - name: SDK feeds 업데이트/설치 및 테마+nikki UI 패키지 컴파일
         run: |
           set -euo pipefail
           cd sdk
           ./scripts/feeds update -a 2>&1 | tee ../feeds-update.log
           ./scripts/feeds install -a 2>&1 | tee ../feeds-install.log
           ./scripts/feeds list -s > ../feeds-list.log || true
+
+          # --- luci-app-nikki의 대시보드 프리셋을 한국어판 하나로 교체 ---
+          MIXIN_JS=$(find feeds package -type f -path "*${NIKKI_LUCI_PKG}*/mixin.js" | head -n1)
+          if [ -z "${MIXIN_JS}" ]; then
+            echo "::error::${NIKKI_LUCI_PKG}의 mixin.js를 찾지 못했습니다. 피드 구조가 바뀌었을 수 있습니다."
+            exit 1
+          fi
+          echo "패치 대상: ${MIXIN_JS}"
+          python3 - "${MIXIN_JS}" "${DASHBOARD_KO_URL}" "${DASHBOARD_KO_LABEL}" <<'PYEOF'
+          import re
+          import sys
+
+          path, url, label = sys.argv[1], sys.argv[2], sys.argv[3]
+          with open(path, "r", encoding="utf-8") as f:
+              lines = f.readlines()
+
+          # 1) 기존 대시보드 프리셋(Zephyruso/zashboard, MetaCubeX 계열) 줄 제거
+          markers = (
+              "Zephyruso/zashboard",
+              "MetaCubeX/metacubexd",
+              "MetaCubeX/Yacd-meta",
+              "MetaCubeX/Razord-meta",
+          )
+          removed = 0
+          kept = []
+          for line in lines:
+              if any(m in line for m in markers):
+                  removed += 1
+                  continue
+              kept.append(line)
+          if removed == 0:
+              print("WARNING: 제거할 기존 프리셋 줄을 찾지 못했습니다 (업스트림 구조 변경 가능성)", file=sys.stderr)
+
+          # 2) ui_url 옵션 선언 다음에 나오는 첫 placeholder 줄 뒤에 한국어 프리셋 삽입
+          out = []
+          inserted = False
+          in_ui_url = False
+          for line in kept:
+              out.append(line)
+              if "'ui_url'" in line:
+                  in_ui_url = True
+                  continue
+              if in_ui_url and "o.placeholder" in line and not inserted:
+                  indent = re.match(r"^(\s*)", line).group(1)
+                  out.append(f"{indent}o.value('{url}', '{label}');\n")
+                  inserted = True
+                  in_ui_url = False
+
+          if not inserted:
+              print("::error::ui_url 옵션 위치를 찾지 못해 한국어 프리셋을 삽입하지 못했습니다.", file=sys.stderr)
+              sys.exit(1)
+
+          with open(path, "w", encoding="utf-8") as f:
+              f.writelines(out)
+          print(f"패치 완료: 기존 프리셋 {removed}줄 제거, 한국어 프리셋 1줄 삽입")
+          PYEOF
+
+          # --- 커스텀 빌드가 nikki 프리빌트 피드보다 항상 우선 선택되도록 PKG_RELEASE 증가 ---
+          NIKKI_LUCI_MAKEFILE=$(find feeds package -type f -path "*${NIKKI_LUCI_PKG}/Makefile" | head -n1)
+          if [ -n "${NIKKI_LUCI_MAKEFILE}" ]; then
+            awk -F':=' 'BEGIN{OFS=":="} /^PKG_RELEASE:=/{$2=$2+1000} {print}' "${NIKKI_LUCI_MAKEFILE}" > /tmp/makefile.new
+            mv /tmp/makefile.new "${NIKKI_LUCI_MAKEFILE}"
+            grep '^PKG_RELEASE' "${NIKKI_LUCI_MAKEFILE}"
+          fi
+
           make defconfig
           make "package/${THEME_PKG}/compile" -j"$(nproc)" V=s 2>&1 | tee ../sdk-build-theme.log
+          make "package/${NIKKI_LUCI_PKG}/compile" -j"$(nproc)" V=s 2>&1 | tee ../sdk-build-nikki-luci.log
 
-      - name: 컴파일된 테마 ipk 수집
+      - name: 컴파일된 커스텀 ipk 수집
         id: theme_ipk
         run: |
           set -euo pipefail
           mkdir -p custom-packages
-          find sdk/bin/packages -iname "${THEME_PKG}*.ipk" -exec cp -f {} custom-packages/ \;
+          find sdk/bin/packages \
+            \( -iname "${THEME_PKG}*.ipk" -o -iname "${NIKKI_LUCI_PKG}*.ipk" \) \
+            -exec cp -f {} custom-packages/ \;
           ls -la custom-packages/
 
       # ---------------------------------------------------------------
@@ -219,6 +301,30 @@ jobs:
 
           cat repositories.conf
 
+      - name: 한국어 대시보드 다운로드 및 이미지에 내장
+        run: |
+          set -euo pipefail
+          # nikki 기본 UI 경로(external-ui: ui)는 실행 시 /etc/nikki/run/ui 로 해석된다.
+          # 부팅 후 사용자가 직접 다운로드 버튼을 누르지 않아도 되도록, 빌드 시점에
+          # 미리 받아서 이미지(files 오버레이)에 구워 넣는다.
+          UI_DIR=imagebuilder/files/etc/nikki/run/ui
+          mkdir -p "${UI_DIR}"
+
+          curl -L --retry 3 --fail -o /tmp/dashboard-ko.zip "${DASHBOARD_KO_URL}"
+          rm -rf /tmp/dashboard-ko-extract
+          mkdir -p /tmp/dashboard-ko-extract
+          unzip -q -o /tmp/dashboard-ko.zip -d /tmp/dashboard-ko-extract
+
+          # 압축 최상위가 폴더 하나뿐이면(예: gh-pages 아카이브 형태) 그 안의 내용물을 사용
+          TOP_ENTRIES=$(find /tmp/dashboard-ko-extract -mindepth 1 -maxdepth 1)
+          TOP_COUNT=$(echo "${TOP_ENTRIES}" | wc -l)
+          if [ "${TOP_COUNT}" -eq 1 ] && [ -d "${TOP_ENTRIES}" ]; then
+            cp -a "${TOP_ENTRIES}/." "${UI_DIR}/"
+          else
+            cp -a /tmp/dashboard-ko-extract/. "${UI_DIR}/"
+          fi
+          ls -la "${UI_DIR}"
+
       - name: 부팅시 기본값(uci-defaults) 생성
         run: |
           set -euo pipefail
@@ -231,6 +337,15 @@ jobs:
           uci set luci.main.mediaurlbase='/luci-static/alpha'
           uci commit system
           uci commit luci
+
+          # nikki UI 프리셋 기본값: 한국어 대시보드
+          # (실제 파일은 이미 이미지에 구워져 있으므로, 이 설정은 나중에 사용자가
+          #  '다운로드' 버튼을 다시 눌러도 한국어판을 받도록 하는 용도)
+          uci -q get nikki.mixin > /dev/null || uci set nikki.mixin=mixin
+          uci set nikki.mixin.ui_name='${DASHBOARD_KO_LABEL}'
+          uci set nikki.mixin.ui_url='${DASHBOARD_KO_URL}'
+          uci commit nikki
+
           exit 0
           EOF
           chmod +x imagebuilder/files/etc/uci-defaults/99-custom-defaults
@@ -278,7 +393,7 @@ jobs:
           # SDK 쪽 설정/피드 정보
           cp -f sdk/.config "${DBG}/sdk/.config" 2>/dev/null || true
           cp -f sdk/feeds.conf.default "${DBG}/sdk/feeds.conf.default" 2>/dev/null || true
-          cp -f feeds-update.log feeds-install.log feeds-list.log sdk-build-theme.log "${DBG}/sdk/" 2>/dev/null || true
+          cp -f feeds-update.log feeds-install.log feeds-list.log sdk-build-theme.log sdk-build-nikki-luci.log "${DBG}/sdk/" 2>/dev/null || true
 
           # ImageBuilder 쪽 설정/피드/빌드 정보
           cp -f imagebuilder/.config "${DBG}/imagebuilder/.config" 2>/dev/null || true
