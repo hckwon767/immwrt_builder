@@ -26,7 +26,7 @@ on:
       hostname:
         description: "장치 호스트네임"
         required: true
-        default: "VPNBOX"
+        default: "ASUS_VPNBOX"
       timezone:
         description: "타임존 (zonename)"
         required: true
@@ -238,14 +238,6 @@ jobs:
               f.writelines(out)
           print(f"패치 완료: 기존 프리셋 {removed}줄 제거, 한국어 프리셋 1줄 삽입")
           PYEOF
-
-          # --- 커스텀 빌드가 nikki 프리빌트 피드보다 항상 우선 선택되도록 PKG_RELEASE 증가 ---
-          NIKKI_LUCI_MAKEFILE=$(find feeds package -type f -path "*${NIKKI_LUCI_PKG}/Makefile" | head -n1)
-          if [ -n "${NIKKI_LUCI_MAKEFILE}" ]; then
-            awk -F':=' 'BEGIN{OFS=":="} /^PKG_RELEASE:=/{$2=$2+1000} {print}' "${NIKKI_LUCI_MAKEFILE}" > /tmp/makefile.new
-            mv /tmp/makefile.new "${NIKKI_LUCI_MAKEFILE}"
-            grep '^PKG_RELEASE' "${NIKKI_LUCI_MAKEFILE}"
-          fi
 
           make defconfig
           make "package/${THEME_PKG}/compile" -j"$(nproc)" V=s 2>&1 | tee ../sdk-build-theme.log
