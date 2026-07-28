@@ -329,8 +329,14 @@ jobs:
 
           mkdir -p custom-packages
           cp -f ../custom-packages/*.ipk custom-packages/ 2>/dev/null || true
-          ../ipkg-make-index.sh custom-packages > custom-packages/Packages
-          gzip -9nk -f custom-packages/Packages
+
+          # 주의: ipkg-make-index.sh에 넘기는 인자가 그대로 Packages의 Filename: 필드에
+          # 기록된다. 여기서 "custom-packages"라는 상대경로를 넘기면 Filename이
+          # "custom-packages/foo.ipk"로 기록되고, repositories.conf의 저장소 기준 URL이
+          # 이미 ".../imagebuilder/custom-packages"이므로 opkg가 두 경로를 이어붙여
+          # ".../custom-packages/custom-packages/foo.ipk"라는 잘못된 이중 경로로
+          # 다운로드를 시도하게 된다. 디렉터리 안에서 "."을 인자로 넘겨 이를 방지한다.
+          (cd custom-packages && ../../ipkg-make-index.sh . > Packages && gzip -9nk -f Packages)
 
           # 서명 확인 비활성화: 로컬 커스텀 피드 + 제3자(nikki) 피드를 쓰기 위한 트레이드오프.
           # 필요 시 nikki의 key-build.pub / usign 키를 keys/ 에 추가하고 이 줄을 유지하는 방식으로 강화 가능.
