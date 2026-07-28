@@ -286,8 +286,8 @@ jobs:
           sed -i '/option check_signature/d' repositories.conf
 
           {
-            echo "src/gzip custom file://$(pwd)/custom-packages"
-            echo "src/gzip nikki ${NIKKI_FEED_URL}"
+            echo "src/gz custom file://$(pwd)/custom-packages"
+            echo "src/gz nikki ${NIKKI_FEED_URL}"
           } | cat - repositories.conf > repositories.conf.new
           mv repositories.conf.new repositories.conf
 
