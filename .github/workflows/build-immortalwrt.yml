@@ -1,4 +1,4 @@
-name: Build ImmortalWrt for orangepi-zero3 (SDK + ImageBuilder)
+name: Build ImmortalWrt for orangepi-zero3 (SDK + ImageBuilder, opkg/24.10.6)
 
 on:
   workflow_dispatch:
@@ -7,15 +7,16 @@ env:
   TARGET: sunxi
   SUBTARGET: cortexa53
   PROFILE: xunlong_orangepi-zero3
-  DOWNLOAD_BASE: https://downloads.immortalwrt.org/snapshots/targets/sunxi/cortexa53
+  # 24.10.6 release = opkg 기반 (apk 아님). apk 전환은 25.12부터.
+  DOWNLOAD_BASE: https://downloads.immortalwrt.org/releases/24.10.6/targets/sunxi/cortexa53
 
 permissions:
   contents: write
 
 jobs:
   # ──────────────────────────────────────────────
-  # JOB 1: SDK로 커스텀 패키지만 컴파일 (bandix, alpha 테마)
-  # OpenClash는 공식 사전 빌드 apk를 그대로 사용 (libffi 이슈 회피)
+  # JOB 1: SDK로 커스텀 패키지 컴파일 (bandix, alpha 테마, OpenClash)
+  # opkg 방식이므로 OpenClash도 apk 공식 릴리즈 대신 소스에서 직접 빌드
   # ──────────────────────────────────────────────
   build-custom-packages:
     runs-on: ubuntu-22.04
@@ -72,7 +73,17 @@ jobs:
           git clone --depth 1 https://github.com/timsaya/luci-app-bandix package/luci-app-bandix
           git clone --depth 1 https://github.com/timsaya/openwrt-bandix package/openwrt-bandix
 
-      - name: Compile Custom Packages Only (bandix, alpha 테마만)
+          # ── OpenClash: opkg 방식으로 전환하면서 공식 apk 릴리즈 다운로드 대신
+          #    소스에서 직접 luci-app-openclash를 빌드 (ipk 산출)
+          rm -rf package/luci-app-openclash
+          git clone --depth 1 https://github.com/vernesong/OpenClash.git /tmp/OpenClash-src
+          mkdir -p package/luci-app-openclash
+          cp -a /tmp/OpenClash-src/luci-app-openclash/. package/luci-app-openclash/
+
+          # zashboard-ko만 사용하므로, 패키지에 기본 내장된 metacubexd UI는 제거
+          rm -rf package/luci-app-openclash/root/usr/share/openclash/ui/metacubexd
+
+      - name: Compile Custom Packages Only (bandix, alpha 테마, openclash)
         run: |
           cd sdk
           make defconfig
@@ -80,29 +91,14 @@ jobs:
           make package/openwrt-bandix/compile V=s -j$(nproc)
           make package/luci-theme-alpha/compile V=s -j$(nproc)
           make package/luci-app-alpha-config/compile V=s -j$(nproc)
-
-      - name: Download Official Prebuilt OpenClash (공식 apk, SDK 빌드 우회)
-        run: |
-          mkdir -p /tmp/custom-packages
-          curl -sL --retry 2 "https://api.github.com/repos/vernesong/OpenClash/releases/latest" \
-            -o /tmp/openclash_release.json
-
-          DOWNLOAD_URL=$(jq -r '.assets[].browser_download_url' /tmp/openclash_release.json | grep '\.apk$' | head -n1)
-
-          if [ -n "$DOWNLOAD_URL" ]; then
-            FILENAME=$(basename "$DOWNLOAD_URL")
-            echo "Resolved OpenClash URL: $DOWNLOAD_URL"
-            echo "Saving as: $FILENAME"
-            curl -L --retry 3 --fail -o "/tmp/custom-packages/${FILENAME}" "$DOWNLOAD_URL"
-          else
-            echo "::error::OpenClash apk 릴리즈를 찾지 못했습니다"
-            exit 1
-          fi
+          make package/luci-app-openclash/compile V=s -j$(nproc) || \
+          make package/luci-app-openclash/compile V=s -j1
 
       - name: Collect Built Packages
         run: |
-          find sdk/bin/packages -type f \( -name "*.apk" -o -name "*.ipk" \) \
-            \( -iname "*bandix*" -o -iname "*alpha*" \) \
+          mkdir -p /tmp/custom-packages
+          find sdk/bin/packages -type f -name "*.ipk" \
+            \( -iname "*bandix*" -o -iname "*alpha*" -o -iname "*openclash*" \) \
             -exec cp -v {} /tmp/custom-packages/ \;
           ls -la /tmp/custom-packages/
           tar -czf custom-packages.tar.gz -C /tmp custom-packages
@@ -158,35 +154,19 @@ jobs:
       - name: Register Custom Package Repo
         run: |
           cd imagebuilder
-          mkdir -p custom-repo keys
-          cp ../custom-packages/*.apk custom-repo/ 2>/dev/null || true
-          echo "── 커스텀 패키지 목록 ──"
-          ls -la custom-repo/
 
-          # 커스텀 패키지가 존재할 경우에만 인덱싱 및 추가
-          if [ -n "$(ls -A custom-repo/*.apk 2>/dev/null)" ]; then
-            APK_BIN=$(find "$(pwd)" -maxdepth 5 -type f -name apk -perm -u+x 2>/dev/null | head -n1)
-            echo "Resolved apk binary path: ${APK_BIN:-NOT FOUND}"
+          # opkg 기반 ImageBuilder는 기본적으로 repositories.conf에
+          #   src imagebuilder file:packages
+          # 항목이 이미 등록되어 있고, ./packages 폴더에 넣은 .ipk는
+          # make image 실행 시 자동으로 재인덱싱(Packages/Packages.gz 생성 및
+          # 로컬 키로 서명)됩니다. apk 때처럼 별도 mkndx/서명 작업이 필요 없습니다.
+          mkdir -p packages
+          cp -v ../custom-packages/*.ipk packages/ 2>/dev/null || true
 
-            if [ -n "$APK_BIN" ]; then
-              openssl ecparam -name prime256v1 -genkey -noout -out custom.sec
-              openssl ec -in custom.sec -pubout -out custom.pub
-              cp custom.pub keys/custom-repo.pub
-
-              (cd custom-repo && "$APK_BIN" mkndx --allow-untrusted --sign "$(pwd)/../custom.sec" --output packages.adb *.apk)
-
-              # NOTE: 최신 apk-tools는 로컬 경로에 file:// 스킴이 없으면
-              # repositories 파일의 항목을 인식하지 못하고 레거시 경로
-              # (<repo>/<arch>/APKINDEX.tar.gz)를 찾다가 실패합니다.
-              # (관련 이슈: openwrt/openwrt#18032, #23154)
-              echo "file://$(pwd)/custom-repo" >> repositories
-            fi
-          fi
-
-          echo "── 최종 repositories ──"
-          cat repositories
-          echo "── keys 디렉토리 ──"
-          ls -la keys/
+          echo "── repositories.conf ──"
+          cat repositories.conf
+          echo "── 커스텀 패키지 목록 (packages/) ──"
+          ls -la packages/
 
       - name: Prepare Custom Files Overlay
         run: |
@@ -215,7 +195,7 @@ jobs:
           cp /tmp/clash imagebuilder/files/etc/openclash/core/clash_meta
           chmod +x imagebuilder/files/etc/openclash/core/clash_meta
 
-          # zashboard 한국어 패치
+          # zashboard 한국어 패치 (metacubexd 대체용 대시보드 UI)
           mkdir -p imagebuilder/files/usr/share/openclash/ui/zashboard
           curl -L --retry 3 --fail \
             "https://github.com/hckwon767/dashboard-ko/releases/download/v3.15.0/zashboard-ko.zip" \
@@ -253,7 +233,8 @@ jobs:
               ethtool iperf3 libiperf3 usbutils usbids kmod-usb-printer \
               smartmontools smartmontools-drivedb hd-idle luci-app-hd-idle luci-app-diskman \
             " \
-            FILES="files"
+            FILES="files" \
+            EXTRA_IMAGE_NAME="ko-custom"
 
       - name: Prepare Artifacts for Release
         id: organize
@@ -264,12 +245,13 @@ jobs:
 
           mkdir -p /tmp/release_files
 
-          # 요청된 3종 이미지 (파일명 패턴에 상관없이 매칭)
+          # 요청된 3종 이미지 (ext4 / squashfs sdcard + initramfs kernel)
+          # xunlong_orangepi-zero3 프로필은 기본적으로 ext4/squashfs 둘 다 빌드됨
           cp -av *ext4-sdcard.img.gz        /tmp/release_files/ 2>/dev/null || echo "::warning::ext4-sdcard.img.gz 없음"
           cp -av *squashfs-sdcard.img.gz    /tmp/release_files/ 2>/dev/null || echo "::warning::squashfs-sdcard.img.gz 없음"
           cp -av *initramfs-kernel.bin      /tmp/release_files/ 2>/dev/null || echo "::warning::initramfs-kernel.bin 없음"
 
-          # manifest / config / feeds 정보 (요청하신 "manifest, config, feed" 메타데이터)
+          # manifest / config / feeds 메타데이터
           cp -av *.manifest        /tmp/release_files/ 2>/dev/null || true
           cp -av config.buildinfo  /tmp/release_files/ 2>/dev/null || true
           cp -av feeds.buildinfo   /tmp/release_files/ 2>/dev/null || true
