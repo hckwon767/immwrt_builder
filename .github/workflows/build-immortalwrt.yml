@@ -50,6 +50,8 @@ env:
   LUCI_LANG: ${{ inputs.luci_lang }}
   THEME_REPO: https://github.com/derisamedia/luci-theme-alpha
   THEME_PKG: luci-theme-alpha
+  THEME_CONFIG_REPO: https://github.com/animegasan/luci-app-alpha-config
+  THEME_CONFIG_PKG: luci-app-alpha-config
   BRAND_URL: https://raw.githubusercontent.com/hckwon767/tuf4200q/refs/heads/main/brand.png
   NIKKI_PAGES: https://nikkinikki.pages.dev
   NIKKI_REPO: https://github.com/nikkinikki-org/OpenWrt-nikki.git
@@ -167,6 +169,14 @@ jobs:
           cp -f /tmp/brand.png "sdk/package/${THEME_PKG}/luasrc/style/brand.png" || true
           find "sdk/package/${THEME_PKG}" -type f -iname "brand.png" -exec cp -f /tmp/brand.png {} \;
 
+      - name: luci-app-alpha-config 소스 가져오기 (테마 필수 의존 패키지)
+        run: |
+          set -euo pipefail
+          # luci-theme-alpha는 luci-app-alpha-config가 없으면 설치가 거부된다.
+          # 공식 opkg 피드에는 없으므로 같은 방식으로 SDK에서 같이 빌드한다.
+          rm -rf "sdk/package/${THEME_CONFIG_PKG}"
+          git clone --depth 1 "${THEME_CONFIG_REPO}" "sdk/package/${THEME_CONFIG_PKG}"
+
       - name: nikki 피드 등록
         run: |
           set -euo pipefail
@@ -241,6 +251,7 @@ jobs:
 
           make defconfig
           make "package/${THEME_PKG}/compile" -j"$(nproc)" V=s 2>&1 | tee ../sdk-build-theme.log
+          make "package/${THEME_CONFIG_PKG}/compile" -j"$(nproc)" V=s 2>&1 | tee ../sdk-build-theme-config.log
           make "package/${NIKKI_LUCI_PKG}/compile" -j"$(nproc)" V=s 2>&1 | tee ../sdk-build-nikki-luci.log
 
       - name: 컴파일된 커스텀 ipk 수집
@@ -249,7 +260,7 @@ jobs:
           set -euo pipefail
           mkdir -p custom-packages
           find sdk/bin/packages \
-            \( -iname "${THEME_PKG}*.ipk" -o -iname "${NIKKI_LUCI_PKG}*.ipk" \) \
+            \( -iname "${THEME_PKG}*.ipk" -o -iname "${THEME_CONFIG_PKG}*.ipk" -o -iname "${NIKKI_LUCI_PKG}*.ipk" \) \
             -exec cp -f {} custom-packages/ \;
           ls -la custom-packages/
 
@@ -347,7 +358,7 @@ jobs:
         run: |
           set -euo pipefail
           cd imagebuilder
-          PACKAGES="${THEME_PKG} luci-i18n-base-${LUCI_LANG} luci-mod-dashboard luci-i18n-dashboard-${LUCI_LANG} nikki luci-app-nikki"
+          PACKAGES="${THEME_PKG} ${THEME_CONFIG_PKG} luci-i18n-base-${LUCI_LANG} luci-mod-dashboard luci-i18n-dashboard-${LUCI_LANG} nikki luci-app-nikki"
           echo "${PACKAGES}" > ../packages-used.txt
           make image \
             PROFILE="${PROFILE}" \
@@ -385,7 +396,7 @@ jobs:
           # SDK 쪽 설정/피드 정보
           cp -f sdk/.config "${DBG}/sdk/.config" 2>/dev/null || true
           cp -f sdk/feeds.conf.default "${DBG}/sdk/feeds.conf.default" 2>/dev/null || true
-          cp -f feeds-update.log feeds-install.log feeds-list.log sdk-build-theme.log sdk-build-nikki-luci.log "${DBG}/sdk/" 2>/dev/null || true
+          cp -f feeds-update.log feeds-install.log feeds-list.log sdk-build-theme.log sdk-build-theme-config.log sdk-build-nikki-luci.log "${DBG}/sdk/" 2>/dev/null || true
 
           # ImageBuilder 쪽 설정/피드/빌드 정보
           cp -f imagebuilder/.config "${DBG}/imagebuilder/.config" 2>/dev/null || true
