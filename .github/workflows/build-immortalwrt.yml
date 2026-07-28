@@ -6,15 +6,15 @@ on:
       target:
         description: "타겟 (예: mediatek, sunxi)"
         required: true
-        default: "sunxi"
+        default: "mediatek"
       subtarget:
         description: "서브타겟 (예: filogic, cortexa53)"
         required: true
-        default: "cortexa53"
+        default: "filogic"
       profile:
         description: "프로필 (예: asus_tuf-ax4200q, xunlong_orangepi-zero3)"
         required: true
-        default: "xunlong_orangepi-zero2"
+        default: "asus_tuf-ax4200q"
       branch:
         description: "추적할 마이너 릴리스 브랜치 (예: 24.10) - 이 안에서 최신 패치버전을 자동 탐색"
         required: true
@@ -26,7 +26,7 @@ on:
       hostname:
         description: "장치 호스트네임"
         required: true
-        default: "VPNBOX"
+        default: "ASUS_VPNBOX"
       timezone:
         description: "타임존 (zonename)"
         required: true
@@ -65,8 +65,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential clang flex bison g++ gawk \
             gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev \
-            python3-setuptools rsync swig unzip zlib1g-dev file wget curl \
-            zstd opkg-utils
+            python3-setuptools rsync swig unzip zlib1g-dev file wget curl zstd
 
       # ---------------------------------------------------------------
       # 1) branch 내 최신 릴리스 버전 자동 탐색 (또는 version_pin 사용)
@@ -130,6 +129,9 @@ jobs:
           [ -f sdk.tar.zst ] || curl -fsSL -o sdk.tar.zst "${{ steps.resolve.outputs.sdk_url }}"
           mkdir -p sdk
           tar --use-compress-program=unzstd -xf sdk.tar.zst -C sdk --strip-components=1
+          # ImageBuilder tarball에는 이 스크립트가 없으므로 SDK에서 미리 복사해둔다
+          cp sdk/scripts/ipkg-make-index.sh ./ipkg-make-index.sh
+          chmod +x ./ipkg-make-index.sh
 
       - name: luci-theme-alpha 소스 가져오기 + brand.png 교체
         run: |
@@ -187,7 +189,7 @@ jobs:
 
           mkdir -p custom-packages
           cp -f ../custom-packages/*.ipk custom-packages/ 2>/dev/null || true
-          opkg-make-index custom-packages > custom-packages/Packages
+          ../ipkg-make-index.sh custom-packages > custom-packages/Packages
           gzip -9nk -f custom-packages/Packages
 
           # 서명 확인 비활성화: 로컬 커스텀 피드 + 제3자(nikki) 피드를 쓰기 위한 트레이드오프.
