@@ -1,0 +1,1552 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Project-Id-Version: luci-app-clashoo\n"
+"PO-Revision-Date: 2026-07-10 09:23+0800\n"
+"Last-Translator: kenzok8 <kenzok8@gmail.com>\n"
+"Language-Team: Korean\n"
+"Language: ko\n"
+"MIME-Version: 1.0\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+msgid " (auto-detected by device)"
+msgstr " (장치에서 자동 감지됨)"
+
+msgid " (expired)"
+msgstr " (만료됨)"
+
+msgid " (refreshing)"
+msgstr " (새로고침 중)"
+
+msgid " candidates"
+msgstr " 개 후보"
+
+msgid " days)"
+msgstr " 일)"
+
+msgid " files)"
+msgstr " 개 파일)"
+
+msgid " groups"
+msgstr " 개 그룹"
+
+msgid " latency test failed: "
+msgstr " 지연 시간 테스트 실패: "
+
+msgid " saved"
+msgstr " 저장됨"
+
+msgid " seconds"
+msgstr " 초"
+
+msgid " switch error"
+msgstr " 전환 오류"
+
+msgid " switch failed: "
+msgstr " 전환 실패: "
+
+msgid " update succeeded"
+msgstr " 업데이트 성공"
+
+msgid " updated"
+msgstr " 업데이트됨"
+
+msgid "$1 updated"
+msgstr "$1 업데이트됨"
+
+msgid "(empty)"
+msgstr "(비어 있음)"
+
+msgid ", click Start to take effect"
+msgstr ", 적용하려면 시작을 클릭하세요"
+
+msgid ", failed "
+msgstr ", 실패 "
+
+msgid ", skipped "
+msgstr ", 건너뜀 "
+
+msgid ", switched to active configuration"
+msgstr ", 활성 설정으로 전환됨"
+
+msgid ", switching to active configuration..."
+msgstr ", 활성 설정으로 전환 중..."
+
+msgid ", unchanged "
+msgstr ", 변경 없음 "
+
+msgid "; updated "
+msgstr "; 업데이트됨 "
+
+msgid "<em>(empty)</em>"
+msgstr "<em>(비어 있음)</em>"
+
+msgid "China traffic bypasses the core at firewall level; DNS behavior is slightly weaker. Choose as needed."
+msgstr "중국 본토 트래픽은 방화벽 수준에서 코어를 우회하며, DNS 기능이 약간 제한될 수 있습니다. 필요에 따라 선택하세요."
+
+msgid "Fast resolution and accurate routing; China routing is handled by the core."
+msgstr "빠른 확인 및 정확한 라우팅을 제공하며, 중국 트래픽 라우팅은 코어에서 처리합니다."
+
+msgid "<strong>Note:</strong> Proxy node domains still use direct DNS for startup resolution, not for normal client domain queries.<br>"
+msgstr "<strong>참고:</strong> 프록시 노드 도메인은 시작 시 초기 해소를 위해 직접 연결 DNS를 사용하며, 일반 클라이언트 도메인 조회에는 사용되지 않습니다.<br>"
+
+msgid "<strong>Prerequisite:</strong> The configuration must include transparent proxying (TUN auto-route or TProxy inbound). Restart after switching."
+msgstr "<strong>전제 조건:</strong> 설정에 투명 프록시(TUN auto-route 또는 TProxy inbound)가 포함되어야 합니다. 전환 후 재시작하세요."
+
+msgid "<strong>Warning:</strong> After enabling, IPv6 sites can only be accessed over IPv4; pure IPv6 networks may lose connectivity."
+msgstr "<strong>경고:</strong> 활성화하면 IPv6 사이트에 IPv4로만 접근할 수 있으며, 순수 IPv6 네트워크에서는 연결이 끊어질 수 있습니다."
+
+msgid "Access Check"
+msgstr "접속 확인"
+
+msgid "Access Control"
+msgstr "접근 제어"
+
+msgid "Access Secret"
+msgstr "접근 비밀번호"
+
+msgid "Actions"
+msgstr "작업"
+
+msgid "Active"
+msgstr "사용 중"
+
+msgid "Advanced DNS"
+msgstr "고급 DNS"
+
+msgid "Advanced Settings (core / data components)"
+msgstr "고급 설정 (코어 / 데이터 구성 요소)"
+
+msgid "For providers that directly offer sing-box JSON subscriptions, or links already converted by external tools. After fetching, click Update on the corresponding item in the Configuration Files tab to fetch the latest configuration again."
+msgstr "sing-box JSON 형식의 구독을 직접 제공하는 제공업체 또는 외부 도구로 변환된 링크용입니다. 불러온 후 '설정 파일' 탭의 해당 항목에서 '업데이트'를 클릭하여 최신 설정을 다시 가져올 수 있습니다."
+
+msgid "All"
+msgstr "전체"
+
+msgid "All components are up to date"
+msgstr "모든 구성 요소가 최신 상태입니다"
+
+msgid "All Devices"
+msgstr "모든 기기"
+
+msgid "All Ports"
+msgstr "모든 포트"
+
+msgid "Allow LAN Access"
+msgstr "LAN 접근 허용"
+
+msgid "Allowlist"
+msgstr "허용 목록 (화이트리스트)"
+
+msgid "Allowlist (only listed items use fake-IP)"
+msgstr "허용 목록 (목록에 있는 항목만 fake-IP 사용)"
+
+msgid "Alpha"
+msgstr "Alpha 버전"
+
+msgid "Already up to date"
+msgstr "이미 최신 버전입니다"
+
+msgid "Apply Configuration"
+msgstr "설정 적용"
+
+msgid "Applying…"
+msgstr "적용 중…"
+
+msgid "ASN Priority"
+msgstr "ASN 우선순위"
+
+msgid "Auto Scroll"
+msgstr "자동 스크롤"
+
+msgid "Auto setup completed."
+msgstr "자동 설정이 완료되었습니다."
+
+msgid "Auto Update Model"
+msgstr "모델 자동 업데이트"
+
+msgid "Auto-detected"
+msgstr "자동 감지됨"
+
+msgid "Automatically choose available DNS and update only upstream servers; split policies and advanced settings remain unchanged."
+msgstr "사용 가능한 DNS를 자동으로 선택하고 상류(Upstream) 서버만 업데이트합니다. 분할 정책 및 고급 설정은 변경되지 않습니다."
+
+msgid "Automatically switch Url-test and Load-balance policy groups to Smart policy groups"
+msgstr "Url-test 및 Load-balance 정책 그룹을 Smart 정책 그룹으로 자동 전환"
+
+msgid "Automation Tasks"
+msgstr "자동화 작업"
+
+msgid "Backend Core"
+msgstr "백엔드 코어"
+
+msgid "Backup and Restore"
+msgstr "백업 및 복원"
+
+msgid "Backup exported ("
+msgstr "백업이 내보내졌습니다 ("
+
+msgid "Backup restored, restarting service"
+msgstr "백업이 복원되었습니다. 서비스를 재시작합니다"
+
+msgid "Basic DNS"
+msgstr "기본 DNS"
+
+msgid "Block QUIC"
+msgstr "QUIC 차단"
+
+msgid "Blocklist"
+msgstr "차단 목록 (블랙리스트)"
+
+msgid "Blocklist (listed items use real IP, default)"
+msgstr "차단 목록 (목록 항목은 실제 IP 사용, 기본값)"
+
+msgid "Blocklist/allowlist mode: enter domains or shorthand like <code>geosite:cn</code>. Rule mode: enter items with the same syntax as rules, such as <code>GEOSITE,cn,real-ip</code> / <code>RULE-SET,xxx,real-ip</code>; usually add <code>MATCH,fake-ip</code> at the end as fallback. <code>geosite:cn</code> automatically uses built-in cn.mrs acceleration and avoids loading the 10MB geosite.dat."
+msgstr "차단/허용 목록 모드: 도메인 또는 <code>geosite:cn</code>과 같은 약식을 입력합니다. 규칙 모드: <code>GEOSITE,cn,real-ip</code> / <code>RULE-SET,xxx,real-ip</code>와 같이 규칙과 동일한 구문의 항목을 입력하며, 통상 끝에 <code>MATCH,fake-ip</code>를 추가합니다. <code>geosite:cn</code>을 사용하면 내장된 cn.mrs 가속을 자동으로 적용하여 10MB 크기의 geosite.dat 로딩을 방지합니다."
+
+msgid "Bypass China IP"
+msgstr "중국 IP 우회"
+
+msgid "Bypass Ports"
+msgstr "우회 포트"
+
+msgid "Bypass Rules"
+msgstr "우회 규칙"
+
+msgid "ByteDance"
+msgstr "ByteDance"
+
+msgid "Cannot connect to core API. Check runtime status."
+msgstr "코어 API에 연결할 수 없습니다. 실행 상태를 확인하세요."
+
+msgid "Check and Update"
+msgstr "확인 및 업데이트"
+
+msgid "Check Updates"
+msgstr "업데이트 확인"
+
+msgid "Checking configuration file"
+msgstr "설정 파일 확인 중"
+
+msgid "Checking environment…"
+msgstr "환경 확인 중…"
+
+msgid "Checking…"
+msgstr "확인 중…"
+
+msgid "Cleaning mihomo network rules"
+msgstr "mihomo 네트워크 규칙 정리 중"
+
+msgid "Cleaning sing-box network rules"
+msgstr "sing-box 네트워크 규칙 정리 중"
+
+msgid "Cleanup failed (mihomo may not be running)"
+msgstr "정리 실패 (mihomo가 실행 중이지 않을 수 있음)"
+
+msgid "Cleanup interval (hours)"
+msgstr "정리 주기 (시간)"
+
+msgid "Clear"
+msgstr "지우기"
+
+msgid "Clear File"
+msgstr "파일 비우기"
+
+msgid "Clear Smart Cache"
+msgstr "Smart 캐시 비우기"
+
+msgid "Clear the current log file? This cannot be undone."
+msgstr "현재 로그 파일을 비우시겠습니까? 이 작업은 되돌릴 수 없습니다."
+
+msgid "Clear View"
+msgstr "화면 비우기"
+
+msgid "Click Save after editing; switching configuration automatically restarts the service"
+msgstr "수정 후 저장을 클릭하세요. 설정을 전환하면 서비스가 자동으로 재시작됩니다."
+
+msgid "Collapse"
+msgstr "접기"
+
+msgid "Collect node latency data for LightGBM model training"
+msgstr "LightGBM 모델 학습을 위한 노드 지연 시간 데이터 수집"
+
+msgid "Collect Training Data"
+msgstr "학습 데이터 수집"
+
+msgid "Common Ports"
+msgstr "일반 포트"
+
+msgid "Completed"
+msgstr "완료됨"
+
+msgid "Component update task submitted"
+msgstr "구성 요소 업데이트 작업이 제출되었습니다"
+
+msgid "Component Updates"
+msgstr "구성 요소 업데이트"
+
+msgid "Configuration"
+msgstr "설정"
+
+msgid "Configuration content appears here after selecting a file…"
+msgstr "파일을 선택하면 설정 내용이 여기에 표시됩니다…"
+
+msgid "Configuration file name (optional, blank auto-generates singbox.json)"
+msgstr "설정 파일 이름 (선택 사항, 비워두면 singbox.json 자동 생성)"
+
+msgid "Configuration Files"
+msgstr "설정 파일"
+
+msgid "Configuration is up to date; no fixes needed"
+msgstr "설정이 최신 상태입니다. 수정이 필요 없습니다"
+
+msgid "Configuration saved"
+msgstr "설정이 저장되었습니다"
+
+msgid "Configuration saved and service hot-reloaded"
+msgstr "설정이 저장되었으며 서비스가 핫 리로드되었습니다"
+
+msgid "Configuration saved, service is not running"
+msgstr "설정이 저장되었으나 서비스가 실행 중이 아닙니다"
+
+msgid "Configuration saved, service remains stopped"
+msgstr "설정이 저장되었으며 서비스는 정지 상태를 유지합니다"
+
+msgid "Configuration saved, switched and started selected core"
+msgstr "설정이 저장되었으며, 선택한 코어로 전환되어 시작되었습니다"
+
+msgid "Connection failed"
+msgstr "연결 실패"
+
+msgid "Connections"
+msgstr "연결"
+
+msgid "Convert YAML subscriptions to sing-box JSON, automatically injecting TUN transparent proxy and China direct rules. Files with the same name are overwritten; use the same name when updating."
+msgstr "YAML 구독을 sing-box JSON으로 변환하고 TUN 투명 프록시 및 중국 직련 규칙을 자동으로 주입합니다. 동일한 이름의 파일은 덮어씌워지므로 업데이트 시 동일한 이름을 사용하세요."
+
+msgid "Core and Data"
+msgstr "코어 및 데이터"
+
+msgid "Core did not start within 15 seconds (procd is recovering)"
+msgstr "코어가 15초 내에 시작되지 않았습니다 (procd 복구 중)"
+
+msgid "Core Download"
+msgstr "코어 다운로드"
+
+msgid "Core is not running. Start it before switching nodes."
+msgstr "코어가 실행 중이지 않습니다. 노드를 전환하기 전에 코어를 시작하세요."
+
+msgid "Core Log"
+msgstr "코어 로그"
+
+msgid "Core Only (advanced)"
+msgstr "코어 전용 (고급)"
+
+msgid "Core Switch"
+msgstr "코어 전환"
+
+msgid "Core switch failed"
+msgstr "코어 전환 실패"
+
+msgid "Core Type"
+msgstr "코어 유형"
+
+msgid "Core type saved, takes effect on next start or restart"
+msgstr "코어 유형이 저장되었으며 다음 시작 또는 재시작 시 적용됩니다"
+
+msgid "Core verification failed. Check System → Core."
+msgstr "코어 검증 실패. '시스템 → 코어'를 확인하세요."
+
+msgid "Correct routing by forcing a domain or IP to Direct or Proxy. These rules take priority over subscription rules and apply to both mihomo and sing-box."
+msgstr "특정 도메인이나 IP를 '직접 연결' 또는 '프록시'로 강제하여 라우팅을 수정합니다. 이 규칙은 구독 자체 규칙보다 우선하며 mihomo 및 sing-box 모두에 적용됩니다."
+
+msgid "CPU Architecture"
+msgstr "CPU 아키텍처"
+
+msgid "CPU architecture set to "
+msgstr "CPU 아키텍처가 다음으로 설정됨: "
+
+msgid "curl or wget not found"
+msgstr "curl 또는 wget을 찾을 수 없습니다"
+
+msgid "Current configuration has no manually switchable proxy groups"
+msgstr "현재 설정에 수동으로 전환 가능한 프록시 그룹이 없습니다"
+
+msgid "Current configuration has no recorded subscription URL"
+msgstr "현재 설정에 기록된 구독 URL이 없습니다"
+
+msgid "Current configuration is a custom file; no subscription update needed"
+msgstr "현재 설정은 사용자 지정 파일이므로 구독 업데이트가 필요하지 않습니다"
+
+msgid "Current version: "
+msgstr "현재 버전: "
+
+msgid "Current: %s"
+msgstr "현재: %s"
+
+msgid "Custom"
+msgstr "사용자 지정"
+
+msgid "Custom Ports"
+msgstr "사용자 지정 포트"
+
+msgid "Custom Routing Rules"
+msgstr "사용자 지정 라우팅 규칙"
+
+msgid "Custom User-Agent"
+msgstr "사용자 지정 User-Agent"
+
+msgid "Customize..."
+msgstr "사용자 지정..."
+
+msgid "Dashboard"
+msgstr "대시보드"
+
+msgid "Dashboard Port"
+msgstr "대시보드 포트"
+
+msgid "Dashboard Settings"
+msgstr "대시보드 설정"
+
+msgid "Default"
+msgstr "기본값"
+
+msgid "Degraded"
+msgstr "제한적 실행 (성능 저하)"
+
+msgid "Delete"
+msgstr "삭제"
+
+msgid "Delete "
+msgstr "삭제 "
+
+msgid "Direct"
+msgstr "직접 연결 (Direct)"
+
+msgid "Direct Domain Resolver"
+msgstr "직접 연결 도메인 리솔버"
+
+msgid "Disable QUIC GSO"
+msgstr "QUIC GSO 비활성화"
+
+msgid "Disabling DNS cache"
+msgstr "DNS 캐시 비활성화 중"
+
+msgid "DNS Address"
+msgstr "DNS 주소"
+
+msgid "DNS Auto Setup"
+msgstr "DNS 자동 설정"
+
+msgid "DNS auto setup applied, service is restarting"
+msgstr "DNS 자동 설정이 적용되었습니다. 서비스를 재시작합니다"
+
+msgid "DNS auto setup failed"
+msgstr "DNS 자동 설정 실패"
+
+msgid "DNS auto setup failed: "
+msgstr "DNS 자동 설정 실패: "
+
+msgid "DNS auto setup saved, service is not running"
+msgstr "DNS 자동 설정이 저장되었으나 서비스가 실행 중이 아닙니다"
+
+msgid "DNS configuration saved and service hot-reloaded"
+msgstr "DNS 설정이 저장되었으며 서비스가 핫 리로드되었습니다"
+
+msgid "DNS configuration saved, service is not running"
+msgstr "DNS 설정이 저장되었으나 서비스가 실행 중이 아닙니다"
+
+msgid "DNS Listen Port"
+msgstr "DNS 수신 포트"
+
+msgid "DNS Policy"
+msgstr "DNS 분할 정책"
+
+msgid "DNS queries follow the routing rules, so overseas domains resolve through the proxy instead of a polluted result. Requires proxy-server-nameserver."
+msgstr "DNS 질의가 라우팅 규칙을 따르므로 해외 도메인은 오염된 결과 대신 프록시를 통해 해소됩니다. proxy-server-nameserver 설정이 필요합니다."
+
+msgid "DNS Respect Rules"
+msgstr "DNS 라우팅 규칙 준수"
+
+msgid "Domain / IP"
+msgstr "도메인 / IP"
+
+msgid "Domain keyword (e.g. youtube)"
+msgstr "도메인 키워드 (예: youtube)"
+
+msgid "Domain Split DNS"
+msgstr "도메인 분할 DNS"
+
+msgid "Domain suffix (e.g. google.com)"
+msgstr "도메인 접미사 (예: google.com)"
+
+msgid "Domestic"
+msgstr "국내"
+
+msgid "Domestic Upstream DNS"
+msgstr "국내 상류 DNS"
+
+msgid "Download"
+msgstr "다운로드"
+
+msgid "Download failed (error code $1)"
+msgstr "다운로드 실패 (오류 코드 $1)"
+
+msgid "Download Subscription"
+msgstr "구독 다운로드"
+
+msgid "Download succeeded"
+msgstr "다운로드 성공"
+
+msgid "Downloaded Subscriptions"
+msgstr "다운로드된 구독 목록"
+
+msgid "Downloading LightGBM model..."
+msgstr "LightGBM 모델 다운로드 중..."
+
+msgid "Downloading subscription..."
+msgstr "구독 다운로드 중..."
+
+msgid "Downloading..."
+msgstr "다운로드 중..."
+
+msgid "Downloading…"
+msgstr "다운로드 중…"
+
+msgid "ECS Client Subnet"
+msgstr "ECS 클라이언트 서브넷"
+
+msgid "Edit"
+msgstr "편집"
+
+msgid "Editing: "
+msgstr "편집 중: "
+
+msgid "Enable"
+msgstr "활성화"
+
+msgid "Enable DNS Module"
+msgstr "DNS 모듈 활성화"
+
+msgid "Enable LightGBM Model"
+msgstr "LightGBM 모델 활성화"
+
+msgid "Enable Service"
+msgstr "서비스 활성화"
+
+msgid "Enhanced Mode"
+msgstr "향상된 모드"
+
+msgid "Enter remote template URL, e.g. https://raw.githubusercontent.com/…/Clash.yaml"
+msgstr "원격 템플릿 URL을 입력하세요 (예: https://raw.githubusercontent.com/…/Clash.yaml)"
+
+msgid "Enter subscription URL (injected into template proxy-providers)"
+msgstr "구독 URL 입력 (템플릿의 proxy-providers에 주입됨)"
+
+msgid "Every"
+msgstr "매"
+
+msgid "Exact domain (e.g. www.google.com)"
+msgstr "정확한 도메인 (예: www.google.com)"
+
+msgid "example.com or 1.2.3.0/24"
+msgstr "example.com 또는 1.2.3.0/24"
+
+msgid "Example: geosite:cn uses https://dns.alidns.com/dns-query; geosite:geolocation-!cn uses https://cloudflare-dns.com/dns-query."
+msgstr "예시: geosite:cn은 https://dns.alidns.com/dns-query를 사용하며, geosite:geolocation-!cn은 https://cloudflare-dns.com/dns-query를 사용합니다."
+
+msgid "Expand"
+msgstr "펼치기"
+
+msgid "Expires: "
+msgstr "만료일: "
+
+msgid "Export a backup before changing cores or configuration, so it can be restored if needed. Includes configuration and settings only, not cores."
+msgstr "코어나 설정을 변경하기 전에 백업을 내보내면 필요할 때 복원할 수 있습니다. 설정 및 환경 값만 포함되며 코어 파일은 포함되지 않습니다."
+
+msgid "Export Backup"
+msgstr "백업 내보내기"
+
+msgid "Export failed: "
+msgstr "내보내기 실패: "
+
+msgid "Exporting…"
+msgstr "내보내는 중…"
+
+msgid "Factory defaults restored"
+msgstr "공장 초기화 설정으로 복원되었습니다"
+
+msgid "Failed"
+msgstr "실패"
+
+msgid "Failed to check updates, please check the network"
+msgstr "업데이트 확인 실패. 네트워크 상태를 확인하세요."
+
+msgid "Failed to save core configuration"
+msgstr "코어 설정 저장 실패"
+
+msgid "Failed to submit component update task"
+msgstr "구성 요소 업데이트 작업 제출 실패"
+
+msgid "Fake-IP Filter Domains"
+msgstr "Fake-IP 필터 도메인"
+
+msgid "Fake-IP Filter Mode"
+msgstr "Fake-IP 필터 모드"
+
+msgid "Fake-IP Range"
+msgstr "Fake-IP 대역"
+
+msgid "Fallback"
+msgstr "폴백 (Fallback)"
+
+msgid "Fallback GeoIP Filter"
+msgstr "Fallback GeoIP 필터"
+
+msgid "Bootstrap"
+msgstr "부트스트랩 DNS"
+
+msgid "Fetch and Apply"
+msgstr "가져오기 및 적용"
+
+msgid "Fetch Configuration"
+msgstr "설정 가져오기"
+
+msgid "Fetching…"
+msgstr "가져오는 중…"
+
+msgid "File Name"
+msgstr "파일 이름"
+
+msgid "File name (optional, blank for automatic name)"
+msgstr "파일 이름 (선택 사항, 비워두면 자동 지정)"
+
+msgid "File name (optional, blank to auto-generate)"
+msgstr "파일 이름 (선택 사항, 비워두면 자동 생성)"
+
+msgid "Fix Deprecated Fields"
+msgstr "더 이상 사용되지 않는 필드 수정"
+
+msgid "Fix failed: "
+msgstr "수정 실패: "
+
+msgid "Fixed deprecated fields: "
+msgstr "더 이상 사용되지 않는 필드가 수정됨: "
+
+msgid "Force ASN lookup and prefer target ASN information when selecting nodes for a more stable experience"
+msgstr "더 안정적인 경험을 위해 노드 선택 시 ASN 조회를 강제하고 대상 ASN 정보를 우선적으로 적용합니다."
+
+msgid "Force DNS Forwarding"
+msgstr "강제 DNS 전달"
+
+msgid "Force ECS Override"
+msgstr "강제 ECS 덮어쓰기"
+
+msgid "Full URL / no protocol prefix"
+msgstr "전체 URL / 프로토콜 접두사 없음"
+
+msgid "Generate Configuration"
+msgstr "설정 생성"
+
+msgid "Generate error: "
+msgstr "생성 오류: "
+
+msgid "Generate failed: "
+msgstr "생성 실패: "
+
+msgid "Generated: "
+msgstr "생성 완료: "
+
+msgid "Generating…"
+msgstr "생성 중…"
+
+msgid "Generation is taking longer, refreshing to show results…"
+msgstr "생성에 시간이 걸리고 있습니다. 결과를 확인하기 위해 새로고침 중…"
+
+msgid "GeoIP Source"
+msgstr "GeoIP 데이터 소스"
+
+msgid "GeoIP update completed"
+msgstr "GeoIP 업데이트 완료"
+
+msgid "GeoIP update completed, applies after Clashoo restarts"
+msgstr "GeoIP 업데이트가 완료되었습니다. Clashoo 재시작 후 적용됩니다."
+
+msgid "GeoIP update failed"
+msgstr "GeoIP 업데이트 실패"
+
+msgid "GitHub acceleration prefix"
+msgstr "GitHub 가속 접두사"
+
+msgid "Global"
+msgstr "글로벌 (Global)"
+
+msgid "Health check failed"
+msgstr "상태 점검 실패"
+
+msgid "Health check in progress…"
+msgstr "상태 점검 진행 중…"
+
+msgid "Health check passed"
+msgstr "상태 점검 통과"
+
+msgid "hours"
+msgstr "시간"
+
+msgid "HTTP Port"
+msgstr "HTTP 포트"
+
+msgid "Import failed: "
+msgstr "가져오기 실패: "
+
+msgid "Import Restore"
+msgstr "복원 파일 가져오기"
+
+msgid "Importing will overwrite all current configuration and settings with the backup. Existing subscriptions/configuration files will be replaced. Continue?"
+msgstr "가져오기를 진행하면 현재의 모든 설정이 백업 내용으로 덮어씌워집니다. 기존 구독 및 설정 파일이 대체됩니다. 계속하시겠습니까?"
+
+msgid "Information Input"
+msgstr "정보 입력"
+
+msgid "Initializing…"
+msgstr "초기화 중…"
+
+msgid "Intercept IPv6 DNS traffic to prevent devices with hard-coded DNS from bypassing the traffic."
+msgstr "DNS가 고정된 기기가 트래픽을 우회하지 못하도록 IPv6 DNS 트래픽을 차단 및 가로챕니다."
+
+msgid "IP / CIDR (e.g. 8.8.8.8/32)"
+msgstr "IP / CIDR (예: 8.8.8.8/32)"
+
+msgid "IP Allowlist"
+msgstr "IP 허용 목록"
+
+msgid "IP Blocklist"
+msgstr "IP 차단 목록"
+
+msgid "IP rules do not trigger DNS resolution"
+msgstr "IP 규칙이 DNS 해소를 트리거하지 않음"
+
+msgid "IPv4 DNS Hijack"
+msgstr "IPv4 DNS 하이재킹"
+
+msgid "IPv4 Proxy"
+msgstr "IPv4 프록시"
+
+msgid "IPv6 DNS Hijack"
+msgstr "IPv6 DNS 하이재킹"
+
+msgid "IPv6 Proxy"
+msgstr "IPv6 프록시"
+
+msgid "just now"
+msgstr "방금 전"
+
+msgid "Keep the default if unsure."
+msgstr "잘 모르겠다면 기본값을 유지하세요."
+
+msgid "LAN Control"
+msgstr "LAN 제어"
+
+msgid "%d updates available"
+msgstr "%d개 업데이트 가능"
+
+msgid "Last check: initializing"
+msgstr "마지막 확인: 초기화 중"
+
+msgid "Last check: just now"
+msgstr "마지막 확인: 방금 전"
+
+msgid "Last check: %d seconds ago"
+msgstr "마지막 확인: %d초 전"
+
+msgid "Last check: %d minutes ago"
+msgstr "마지막 확인: %d분 전"
+
+msgid "Last check: %d hours ago"
+msgstr "마지막 확인: %d시간 전"
+
+msgid "Last run: "
+msgstr "마지막 실행: "
+
+msgid "LightGBM model file download URL; leave blank to use the default official URL"
+msgstr "LightGBM 모델 파일 다운로드 URL입니다. 공식 기본 URL을 사용하려면 비워두세요."
+
+msgid "LightGBM model updated successfully"
+msgstr "LightGBM 모델이 성공적으로 업데이트되었습니다"
+
+msgid "Load failed"
+msgstr "로드 실패"
+
+msgid "Load-balance"
+msgstr "로드 밸런스 (Load-balance)"
+
+msgid "Loading…"
+msgstr "로딩 중…"
+
+msgid "Local Template"
+msgstr "로컬 템플릿"
+
+msgid "Log"
+msgstr "로그"
+
+msgid "Match Rule"
+msgstr "매칭 규칙"
+
+msgid "Memory usage %s"
+msgstr "메모리 사용량 %s"
+
+msgid "mihomo restarted successfully, please wait for servers to come online."
+msgstr "mihomo가 성공적으로 재시작되었습니다. 서버가 온라인 상태가 될 때까지 기다려 주세요."
+
+msgid "mihomo runs as-is for nikki/OpenClash compatibility; sing-box automatically upgrades old formats for momo/homeproxy compatibility.<br>"
+msgstr "mihomo는 nikki/OpenClash 호환성을 위해 원형 그대로 실행되며, sing-box는 momo/homeproxy 호환성을 위해 구형 형식을 자동으로 업그레이드합니다.<br>"
+
+msgid "mihomo Stable"
+msgstr "mihomo 안정 버전"
+
+msgid "mihomo started successfully, please wait for servers to come online."
+msgstr "mihomo가 성공적으로 시작되었습니다. 서버가 온라인 상태가 될 때까지 기다려 주세요."
+
+msgid "mihomo writes the ecs parameter to DNS URLs; sing-box writes dns.client_subnet. Leave empty to skip."
+msgstr "mihomo는 DNS URL에 ecs 파라미터를 작성하고, sing-box는 dns.client_subnet을 작성합니다. 적용하지 않으려면 비워두세요."
+
+msgid "Mixed Mode"
+msgstr "혼합(Mixed) 모드"
+
+msgid "Mixed Port"
+msgstr "혼합 포트"
+
+msgid "Mode"
+msgstr "모드"
+
+msgid "Model Download URL"
+msgstr "모델 다운로드 URL"
+
+msgid "Model install failed: $1"
+msgstr "모델 설치 실패: $1"
+
+msgid "Model is already up to date"
+msgstr "모델이 이미 최신 버전입니다"
+
+msgid "Model not installed"
+msgstr "모델이 설치되지 않음"
+
+msgid "Network Stack"
+msgstr "네트워크 스택"
+
+msgid "Network Stack Type"
+msgstr "네트워크 스택 유형"
+
+msgid "No auto setup result yet"
+msgstr "자동 설정 결과가 아직 없습니다"
+
+msgid "No component update logs yet"
+msgstr "구성 요소 업데이트 로그가 없습니다"
+
+msgid "No configuration file found. Import a subscription or upload a configuration on the Configuration page first."
+msgstr "설정 파일을 찾을 수 없습니다. 먼저 '설정' 페이지에서 구독을 가져오거나 설정 파일을 업로드하세요."
+
+msgid "No configuration file selected. Select or upload one on the Configuration page before starting."
+msgstr "설정 파일이 선택되지 않았습니다. 시작하기 전에 '설정' 페이지에서 파일을 선택하거나 업로드하세요."
+
+msgid "No configuration files yet. Use Quick Wizard to generate one or upload a JSON file."
+msgstr "설정 파일이 아직 없습니다. 빠른 마법사를 사용하여 생성하거나 JSON 파일을 업로드하세요."
+
+msgid "No proxy groups"
+msgstr "프록시 그룹 없음"
+
+msgid "No subscriptions"
+msgstr "구독 정보 없음"
+
+msgid "Node Panel ›"
+msgstr "노드 패널 ›"
+
+msgid "Node Selection"
+msgstr "노드 선택"
+
+msgid "Node Subscription"
+msgstr "노드 구독"
+
+msgid "Node weight bonus. <1 means lower priority, >1 means higher priority. Modify as needed; leave blank to skip policy-priority injection."
+msgstr "노드 가중치 가산점입니다. <1은 낮음, >1은 높은 우선순위를 의미합니다. 가산점 주입을 원치 않으시면 비워두세요."
+
+msgid "Not installed"
+msgstr "설치되지 않음"
+
+msgid "Not enabled"
+msgstr "비활성화됨"
+
+msgid "Not running"
+msgstr "실행 중이 아님"
+
+msgid "Off"
+msgstr "꺼짐"
+
+msgid "Only subscriptions with recorded source URLs are overwritten; no duplicate files are created."
+msgstr "출처 URL이 기록된 구독만 덮어씌워지며, 중복 파일은 생성되지 않습니다."
+
+msgid "Open Dashboard"
+msgstr "대시보드 열기"
+
+msgid "TUN stack is used when either TCP or UDP mode is TUN."
+msgstr "TCP 또는 UDP 모드 중 하나라도 TUN으로 설정된 경우 이 스택 설정이 적용됩니다."
+
+msgid "OpenClash is enabled; disable it first to avoid rule conflicts"
+msgstr "OpenClash가 활성화되어 있습니다. 규칙 충돌을 방지하려면 먼저 비활성화하세요."
+
+msgid "Operation failed: "
+msgstr "작업 실패: "
+
+msgid "Other Configuration Files (upload / overwrite output)"
+msgstr "기타 설정 파일 (업로드 / 출력 덮어쓰기)"
+
+msgid "Output file name (without extension, blank to auto-fill)"
+msgstr "출력 파일 이름 (확장자 제외, 비워두면 자동 입력)"
+
+msgid "Overseas"
+msgstr "해외"
+
+msgid "Overseas Encrypted DNS (anti-pollution)"
+msgstr "해외 암호화 DNS (오염 방지)"
+
+msgid "Overview"
+msgstr "개요"
+
+msgid "Overwrite Settings"
+msgstr "덮어쓰기 설정"
+
+msgid "Panel"
+msgstr "패널"
+
+msgid "Panel is downloading"
+msgstr "패널 다운로드 중"
+
+msgid "Panel switch failed: "
+msgstr "패널 전환 실패: "
+
+msgid "Panel UI"
+msgstr "패널 UI"
+
+msgid "Password"
+msgstr "비밀번호"
+
+msgid "Paste native sing-box subscription URL (direct JSON response)"
+msgstr "기본 sing-box 구독 URL 붙여넣기 (JSON 직접 반환)"
+
+msgid "Paste subscription URL (supports vmess / vless / trojan, etc.)"
+msgstr "구독 URL 붙여넣기 (vmess / vless / trojan 등 지원)"
+
+msgid "Pause"
+msgstr "일시정지"
+
+msgid "Period for automatically fetching a new model; also controls the cron trigger frequency, default 72 hours"
+msgstr "새 모델을 자동으로 가져오는 주기입니다. cron 실행 빈도도 함께 제어하며 기본값은 72시간입니다."
+
+msgid "Please enter a remote template URL"
+msgstr "원격 템플릿 URL을 입력하세요"
+
+msgid "Please enter a subscription URL"
+msgstr "구독 URL을 입력하세요"
+
+msgid "Please enter an output file name"
+msgstr "출력 파일 이름을 입력하세요"
+
+msgid "Please select a local template file"
+msgstr "로컬 템플릿 파일을 선택하세요"
+
+msgid "Plugin Log"
+msgstr "플러그인 로그"
+
+msgid "Policy Priority (weight bonus)"
+msgstr "정책 우선순위 (가중치 가산점)"
+
+msgid "Policy Type"
+msgstr "정책 유형"
+
+msgid "Port"
+msgstr "포트"
+
+msgid "Port Settings"
+msgstr "포트 설정"
+
+msgid "Prevent DNS Leaks"
+msgstr "DNS 유출 방지"
+
+msgid "Processing…"
+msgstr "처리 중…"
+
+msgid "Protocol"
+msgstr "프로토콜"
+
+msgid "Proxy"
+msgstr "프록시"
+
+msgid "DNS Takeover"
+msgstr "DNS 가로채기 (Takeover)"
+
+msgid "IPv4"
+msgstr "IPv4"
+
+msgid "IPv6"
+msgstr "IPv6"
+
+msgid "MAC"
+msgstr "MAC"
+
+msgid "Rules are matched from top to bottom. Unmatched devices use DNS takeover and proxy by default."
+msgstr "규칙은 위에서 아래로 매칭됩니다. 매칭되지 않은 기기는 기본적으로 DNS를 가로채고 프록시를 통과합니다."
+
+msgid "Proxy Authentication"
+msgstr "프록시 인증"
+
+msgid "Proxy configuration saved and service hot-reloaded"
+msgstr "프록시 설정이 저장되었으며 서비스가 핫 리로드되었습니다"
+
+msgid "Proxy configuration saved, service is not running"
+msgstr "프록시 설정이 저장되었으나 서비스가 실행 중이 아닙니다"
+
+msgid "Proxy Domain Split DNS"
+msgstr "프록시 도메인 분할 DNS"
+
+msgid "Proxy Mode"
+msgstr "프록시 모드"
+
+msgid "Proxy Node Domain Resolver"
+msgstr "프록시 노드 도메인전용 리솔버"
+
+msgid "Quick Wizard"
+msgstr "빠른 마법사"
+
+msgid "Random"
+msgstr "랜덤 (Random)"
+
+msgid "Ready · "
+msgstr "준비됨 · "
+
+msgid "Ready ✓"
+msgstr "준비 완료 ✓"
+
+msgid "Recommended "
+msgstr "추천 "
+
+msgid "Recommended"
+msgstr "추천"
+
+msgid "Recommended blank"
+msgstr "권장: 비워둠"
+
+msgid "Redirect Port"
+msgstr "Redirect 포트"
+
+msgid "Refresh"
+msgstr "새로고침"
+
+msgid "Refresh Access Check"
+msgstr "접속 확인 새로고침"
+
+msgid "Regular domains only use overseas DNS and DNS connections follow proxy rules; DoT/DoQ (port 853) is blocked and IPv6 resolution is disabled. Takes effect after restart.<br>"
+msgstr "일반 도메인은 해외 DNS만 사용하며 DNS 연결은 프록시 규칙을 따릅니다. DoT/DoQ (853 포트)가 차단되고 IPv6 해소가 비활성화됩니다. 재시작 후 적용됩니다.<br>"
+
+msgid "Regularly update rule data"
+msgstr "정기적으로 규칙 데이터 업데이트"
+
+msgid "Reject proxied UDP 443 so some apps fall back to TCP. Try only when downloads or video stall."
+msgstr "프록시 경로의 UDP 443을 거부하여 일부 앱이 TCP로 대체되도록 합니다. 다운로드나 동영상 재생이 멈출 때만 시도하세요."
+
+msgid "Relay"
+msgstr "체인 프록시 (Relay)"
+
+msgid "Remote Template"
+msgstr "원격 템플릿"
+
+msgid "Remote: %s"
+msgstr "원격: %s"
+
+msgid "Removing Cron scheduled tasks"
+msgstr "Cron 예약 작업 삭제 중"
+
+msgid "Requires MMDB. If enabled while the local GeoIP database is missing, the core may fail to start. Usually not needed."
+msgstr "MMDB가 필요합니다. 로컬 GeoIP 데이터베이스가 없는 상태에서 활성화하면 코어 시작에 실패할 수 있습니다. 일반적으로 필요하지 않습니다."
+
+msgid "Restarting client..."
+msgstr "클라이언트 재시작 중..."
+
+msgid "Restarting Dnsmasq"
+msgstr "Dnsmasq 재시작 중"
+
+msgid "Restore Clashoo settings to factory defaults (subscriptions and configuration files are kept). Continue?"
+msgstr "Clashoo 설정을 공장 초기화 상태로 복원합니다 (구독 및 설정 파일은 유지됨). 계속하시겠습니까?"
+
+msgid "Restore Defaults"
+msgstr "기본값으로 복원"
+
+msgid "Restore failed: "
+msgstr "복원 실패: "
+
+msgid "Restoring…"
+msgstr "복원 중…"
+
+msgid "Role"
+msgstr "역할"
+
+msgid "Rule"
+msgstr "규칙 (Rule)"
+
+msgid "Rule data includes China allowlist (direct IP ranges) and GeoIP / GeoSite databases"
+msgstr "규칙 데이터에는 중국 허용 목록 (직접 연결 IP 대역) 및 GeoIP / GeoSite 데이터베이스가 포함됩니다."
+
+msgid "Rule mode (same syntax as rules)"
+msgstr "규칙 모드 (규칙과 동일한 구문)"
+
+msgid "Rules and Control"
+msgstr "규칙 및 제어"
+
+msgid "Run Mode"
+msgstr "실행 모드"
+
+msgid "Run mode setting failed: "
+msgstr "실행 모드 설정 실패: "
+
+msgid "Run only the core with your imported configuration, without taking over firewall / DNS / routing.<br>"
+msgstr "방화벽 / DNS / 라우팅을 가로채지 않고 가져온 설정으로 코어만 실행합니다.<br>"
+
+msgid "Running degraded"
+msgstr "제한적 실행 중"
+
+msgid "Running 🟢"
+msgstr "실행 중 🟢"
+
+msgid "Runtime Status"
+msgstr "실행 상태"
+
+msgid "Sample Rate"
+msgstr "샘플링 비율"
+
+msgid "sample-rate, 1 = sample every latency test; increase to reduce sampling frequency"
+msgstr "sample-rate, 1 = 모든 지연 시간 테스트 시 샘플링. 값을 올리면 수집 빈도가 감소합니다."
+
+msgid "Save"
+msgstr "저장"
+
+msgid "Save Configuration"
+msgstr "설정 저장"
+
+msgid "Save failed: "
+msgstr "저장 실패: "
+
+msgid "Scheduled Log Cleanup"
+msgstr "정기 로그 정리"
+
+msgid "Scheduled Subscription Update"
+msgstr "정기 구독 업데이트"
+
+msgid "Scheduled update settings saved"
+msgstr "정기 업데이트 설정이 저장되었습니다"
+
+msgid "Select a configuration above to edit it here"
+msgstr "위에서 설정을 선택하면 여기서 편집할 수 있습니다"
+
+msgid "Select local template file"
+msgstr "로컬 템플릿 파일 선택"
+
+msgid "Select YAML file to upload"
+msgstr "업로드할 YAML 파일 선택"
+
+msgid "Selector"
+msgstr "선택기 (Selector)"
+
+msgid "Service disabled"
+msgstr "서비스 비활성화됨"
+
+msgid "Service stopped"
+msgstr "서비스 정지됨"
+
+msgid "Setting Cron scheduled tasks and starting process supervisor..."
+msgstr "Cron 예약 작업 설정 및 프로세스 감시 프로그램 시작 중..."
+
+msgid "Setting DNS forwarder / enabling custom DNS"
+msgstr "DNS 전달자 설정 / 사용자 지정 DNS 활성화 중"
+
+msgid "Setting mihomo network rules"
+msgstr "mihomo 네트워크 규칙 설정 중"
+
+msgid "Setting sing-box network rules"
+msgstr "sing-box 네트워크 규칙 설정 중"
+
+msgid "Show/Hide"
+msgstr "표시/숨기기"
+
+msgid "sing-box Configuration Files"
+msgstr "sing-box 설정 파일"
+
+msgid "sing-box core not detected; download sing-box from the System page"
+msgstr "sing-box 코어가 감지되지 않았습니다. '시스템' 페이지에서 sing-box를 다운로드하세요."
+
+msgid "sing-box Independent DNS Cache"
+msgstr "sing-box 독립 DNS 캐시"
+
+msgid "sing-box restarted successfully, please wait for servers to come online."
+msgstr "sing-box가 성공적으로 재시작되었습니다. 서버가 온라인 상태가 될 때까지 기다려 주세요."
+
+msgid "sing-box service failed to start. Check System → Log."
+msgstr "sing-box 서비스 시작 실패. '시스템 → 로그'를 확인하세요."
+
+msgid "sing-box Stable"
+msgstr "sing-box 안정 버전"
+
+msgid "sing-box started successfully, please wait for servers to come online."
+msgstr "sing-box가 성공적으로 시작되었습니다. 서버가 온라인 상태가 될 때까지 기다려 주세요."
+
+msgid "Size"
+msgstr "크기"
+
+msgid "Smart"
+msgstr "Smart 버전"
+
+msgid "Smart cache cleared"
+msgstr "Smart 캐시가 비워졌습니다"
+
+msgid "Smart core not detected; updating the model will not install the core"
+msgstr "Smart 코어가 감지되지 않았습니다. 모델을 업데이트해도 코어가 설치되지 않습니다."
+
+msgid "Smart core not detected; updating the model will not install the core. Download the Smart build from the System page."
+msgstr "Smart 코어가 감지되지 않았습니다. 모델을 업데이트해도 코어가 설치되지 않으므로 '시스템' 페이지에서 Smart 빌드를 다운로드하세요."
+
+msgid "Smart Policy Auto Switch"
+msgstr "Smart 정책 자동 전환"
+
+msgid "Smart Policy Settings"
+msgstr "Smart 정책 설정"
+
+msgid "smart-collector-size, maximum retained training samples, default 100"
+msgstr "smart-collector-size, 보관할 최대 학습 샘플 수, 기본값 100"
+
+msgid "Sniffer (streaming compatibility)"
+msgstr "스니퍼 (스트리밍 호환성)"
+
+msgid "SOCKS5 Port"
+msgstr "SOCKS5 포트"
+
+msgid "Stable"
+msgstr "안정 버전"
+
+msgid "Start downloading LightGBM model: $1"
+msgstr "LightGBM 모델 다운로드 시작: $1"
+
+msgid "Start failed: "
+msgstr "시작 실패: "
+
+msgid "Start Service"
+msgstr "서비스 시작"
+
+msgid "Started ("
+msgstr "시작됨 ("
+
+msgid "Starting client"
+msgstr "클라이언트 시작 중"
+
+msgid "Starting core…"
+msgstr "코어 시작 중…"
+
+msgid "Starting…"
+msgstr "시작 중…"
+
+msgid "Stop Service"
+msgstr "서비스 정지"
+
+msgid "Stopped (not enabled at boot)"
+msgstr "정지됨 (부팅 시 자동 시작 안 함)"
+
+msgid "Stopped"
+msgstr "정지됨"
+
+msgid "Stopping client..."
+msgstr "클라이언트 정지 중..."
+
+msgid "Stopping mihomo"
+msgstr "mihomo 정지 중"
+
+msgid "Stopping mihomo process supervisor"
+msgstr "mihomo 프로세스 감시 프로그램 정지 중"
+
+msgid "Stopping sing-box"
+msgstr "sing-box 정지 중"
+
+msgid "Stopping sing-box process supervisor"
+msgstr "sing-box 프로세스 감시 프로그램 정지 중"
+
+msgid "Stopping…"
+msgstr "정지 중…"
+
+msgid "Submission failed"
+msgstr "제출 실패"
+
+msgid "Submitting"
+msgstr "제출 중"
+
+msgid "Subscription"
+msgstr "구독"
+
+msgid "Subscription download failed"
+msgstr "구독 다운로드 실패"
+
+msgid "Subscription Update"
+msgstr "구독 업데이트"
+
+msgid "Subscription updated successfully"
+msgstr "구독이 성공적으로 업데이트되었습니다"
+
+msgid "Subscription URL"
+msgstr "구독 URL"
+
+msgid "Subscription URLs (one per line)"
+msgstr "구독 URL (줄바꿈으로 구분)"
+
+msgid "Switch"
+msgstr "전환"
+
+msgid "Switch Profile"
+msgstr "프로필 전환"
+
+msgid "Switch configuration failed: "
+msgstr "설정 전환 실패: "
+
+msgid "Switch failed: "
+msgstr "전환 실패: "
+
+msgid "Switched to "
+msgstr "다음으로 전환됨: "
+
+msgid "Switching to "
+msgstr "다음으로 전환 중: "
+
+msgid "Syncing"
+msgstr "동기화 중"
+
+msgid "Syncing runtime state"
+msgstr "실행 상태 동기화 중"
+
+msgid "System"
+msgstr "시스템"
+
+msgid "System is missing nftables runtime"
+msgstr "시스템에 nftables 런타임이 없습니다"
+
+msgid "Target"
+msgstr "대상"
+
+msgid "TCP Mode"
+msgstr "TCP 모드"
+
+msgid "Template Selection"
+msgstr "템플릿 선택"
+
+msgid "Template upload failed: "
+msgstr "템플릿 업로드 실패: "
+
+msgid "Template uploaded: "
+msgstr "템플릿 업로드 성공: "
+
+msgid "Test and Apply"
+msgstr "원클릭 측정 및 적용"
+
+msgid "Test Latency"
+msgstr "속도 측정"
+
+msgid "Testing"
+msgstr "속도 측정 중"
+
+msgid "Testing latency and writing upstream DNS…"
+msgstr "지연 시간을 측정하고 상류 DNS를 입력하는 중…"
+
+msgid "The new core failed to start, please check the core log"
+msgstr "새 코어를 시작하지 못했습니다. 코어 로그를 확인하세요."
+
+msgid "Time"
+msgstr "소요 시간"
+
+msgid "Timeout waiting for new core to start, please check the core log"
+msgstr "새 코어 시작 대기 시간 초과. 코어 로그를 확인하세요."
+
+msgid "Total %s"
+msgstr "총 %s"
+
+msgid "TPROXY Port"
+msgstr "TPROXY 포트"
+
+msgid "Traffic Monitor"
+msgstr "트래픽 모니터"
+
+msgid "Training Data Size"
+msgstr "학습 데이터 크기"
+
+msgid "Transparent Proxy"
+msgstr "투명 프록시"
+
+msgid "TUN Mode"
+msgstr "TUN 모드"
+
+msgid "TUN Network Stack"
+msgstr "TUN 네트워크 스택"
+
+msgid "Type"
+msgstr "유형"
+
+msgid "UDP Mode"
+msgstr "UDP 모드"
+
+msgid "Unknown"
+msgstr "알 수 없음"
+
+msgid "Unknown error"
+msgstr "알 수 없는 오류"
+
+msgid "Update"
+msgstr "업데이트"
+
+msgid "Update All Now"
+msgstr "지금 모두 업데이트"
+
+msgid "Update available"
+msgstr "업데이트 가능"
+
+msgid "Update components individually. Click Check Updates to refresh versions."
+msgstr "구성 요소를 개별적으로 업데이트하세요. '업데이트 확인'을 클릭하여 버전을 새로고침할 수 있습니다."
+
+msgid "Update failed"
+msgstr "업데이트 실패"
+
+msgid "Update failed: "
+msgstr "업데이트 실패: "
+
+msgid "Update interval (hours)"
+msgstr "업데이트 주기 (시간)"
+
+msgid "Update interval must be 1 to 8760 hours"
+msgstr "업데이트 주기는 1시간에서 8760시간 사이여야 합니다"
+
+msgid "Update Log"
+msgstr "업데이트 로그"
+
+msgid "Update Model"
+msgstr "모델 업데이트"
+
+msgid "Update Subscription"
+msgstr "구독 업데이트"
+
+msgid "Update succeeded"
+msgstr "업데이트 성공"
+
+msgid "Updating"
+msgstr "업데이트 중"
+
+msgid "Updating $1"
+msgstr "$1 업데이트 중"
+
+msgid "Updating all subscriptions…"
+msgstr "모든 구독 업데이트 중…"
+
+msgid "Updating…"
+msgstr "업데이트 중…"
+
+msgid "Upload"
+msgstr "업로드"
+
+msgid "Upload Configuration File"
+msgstr "설정 파일 업로드"
+
+msgid "Upload failed"
+msgstr "업로드 실패"
+
+msgid "Upload failed: "
+msgstr "업로드 실패: "
+
+msgid "Upload JSON Configuration"
+msgstr "JSON 설정 업로드"
+
+msgid "Upload succeeded: "
+msgstr "업로드 성공: "
+
+msgid "Upload YAML Template"
+msgstr "YAML 템플릿 업로드"
+
+msgid "Upstream DNS"
+msgstr "상류(Upstream) DNS"
+
+msgid "Url-test"
+msgstr "자동 속도 측정 (Url-test)"
+
+msgid "Use DNS"
+msgstr "DNS 사용"
+
+msgid "Use LightGBM model to predict weights"
+msgstr "LightGBM 모델을 사용하여 가중치 예측"
+
+msgid "Used to resolve DoH/DoT/DoQ server domains; plain IP DNS is recommended."
+msgstr "DoH/DoT/DoQ 서버 도메인을 해소하는 데 사용됩니다. 일반 IP 형태의 DNS를 권장합니다."
+
+msgid "User-Agent (UA)"
+msgstr "사용자 대리인 (User-Agent)"
+
+msgid "Username"
+msgstr "사용자 이름"
+
+msgid "Virtual IP Ping Hijacking"
+msgstr "가상 IP Ping 하이재킹"
+
+msgid "Wait for the current task to complete"
+msgstr "현재 작업이 완료될 때까지 기다려 주세요"
+
+msgid "Waiting for data..."
+msgstr "데이터 대기 중..."
+
+msgid "When downloading core/data components, this prefix will be used first (a slash is required at the end). Leave blank to use the built-in gh-proxy.com and ghfast.top alternative sources."
+msgstr "코어/데이터 구성 요소를 다운로드할 때 이 접두사가 우선 사용됩니다 (끝에 슬래시 필수). 기본 내장 소스(gh-proxy.com, ghfast.top)를 사용하려면 비워두세요."
+
+msgid "When enabled, direct / proxy / fallback roles each use an independent DNS cache. Useful when the same domain needs different resolver chains by routing. Usually not needed."
+msgstr "활성화하면 direct / proxy / fallback 각 역할별로 독립된 DNS 캐시를 사용합니다. 동일한 도메인이 라우팅에 따라 서로 다른 리솔버 체인을 사용해야 할 때 유용합니다. 일반적인 상황에서는 필요하지 않습니다."
+
+msgid "When enabled, sniffer configuration is injected automatically to improve streaming domain detection and routing stability."
+msgstr "활성화하면 스니퍼 설정이 자동으로 주입되어 스트리밍 도메인 감지 및 라우팅 안정성이 향상됩니다."
+
+msgid "YAML Subscription Conversion"
+msgstr "YAML 구독 변환"
+
+msgid "⏳ A download task is already running..."
+msgstr "⏳ 이미 다운로드 작업이 실행 중입니다..."
+
+msgid "⏳ Fetch timed out, refreshing to show results..."
+msgstr "⏳ 가져오기 시간 초과, 결과를 확인하기 위해 새로고침 중..."
+
+msgid "⏳ Fetching configuration..."
+msgstr "⏳ 설정 가져오는 중..."
+
+msgid "⏳ Starting update task..."
+msgstr "⏳ 업데이트 작업 시작 중..."
+
+msgid "⏳ Submitting download task..."
+msgstr "⏳ 다운로드 작업 제출 중..."
+
+msgid "✗ Fetch error: "
+msgstr "✗ 가져오기 오류: "
+
+msgid "✗ Fetch failed: "
+msgstr "✗ 가져오기 실패: "
+
+msgid "✗ Panel update timeout"
+msgstr "✗ 패널 업데이트 시간 초과"
+
+msgid "✗ Please enter a subscription URL"
+msgstr "✗ 구독 URL을 입력하세요"
+
+msgid "✗ Please enter a subscription URL first"
+msgstr "✗ 먼저 구독 URL을 입력하세요"
+
+msgid "✗ Start failed"
+msgstr "✗ 시작 실패"
+
+msgid "✗ Start failed: "
+msgstr "✗ 시작 실패: "
+
+msgid "✗ Submission failed"
+msgstr "✗ 제출 실패"
