@@ -89,7 +89,7 @@ jobs:
             echo "자동 선택된 최신 버전: ${VERSION}"
           fi
 
-          DOWNLOAD_BASE="https://downloads.immortalwrt.org/snapshots/targets/${TARGET}/${SUBTARGET}"
+          DOWNLOAD_BASE="https://downloads.immortalwrt.org/releases/${VERSION}/targets/${TARGET}/${SUBTARGET}"
           PAGE=$(curl -fsSL "${DOWNLOAD_BASE}/")
 
           IB_FILE=$(echo "${PAGE}" | grep -oE "immortalwrt-imagebuilder-[^\"]+\.tar\.zst" | head -n1)
