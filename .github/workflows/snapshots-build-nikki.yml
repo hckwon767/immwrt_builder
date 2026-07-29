@@ -1,4 +1,4 @@
-name: nikki+snapshots Build ImmortalWrt (SDK + ImageBuilder)
+name: snapshots+nikki+Build ImmortalWrt (SDK + ImageBuilder)
 
 on:
   workflow_dispatch:
@@ -15,14 +15,6 @@ on:
         description: "프로필 (예: asus_tuf-ax4200q, xunlong_orangepi-zero3)"
         required: true
         default: "asus_tuf-ax4200q"
-      branch:
-        description: "추적할 마이너 릴리스 브랜치 (예: 24.10, 25.12) - 이 안에서 최신 패치버전을 자동 탐색"
-        required: true
-        default: "24.10"
-      version_pin:
-        description: "특정 버전 강제 고정 (예: 24.10.5). 비워두면 branch 내 최신 자동 선택"
-        required: false
-        default: ""
       hostname:
         description: "장치 호스트네임"
         required: true
@@ -35,8 +27,9 @@ env:
   TARGET: ${{ inputs.target }}
   SUBTARGET: ${{ inputs.subtarget }}
   PROFILE: ${{ inputs.profile }}
-  BRANCH: ${{ inputs.branch }}
-  VERSION_PIN: ${{ inputs.version_pin }}
+  # 항상 downloads.immortalwrt.org/snapshots(마스터 브랜치 스냅샷)에서 받아 빌드하므로
+  # 릴리스 버전 선택은 필요 없다. nikki의 서드파티 피드도 "SNAPSHOT" 브랜치를 그대로 쓴다.
+  NIKKI_BRANCH: "SNAPSHOT"
   DEVICE_HOSTNAME: ${{ inputs.hostname }}
   DEVICE_TZ: "Asia/Shanghai"
   LUCI_LANG: "ko"
@@ -66,40 +59,31 @@ jobs:
             python3-setuptools rsync swig unzip zlib1g-dev file wget curl zstd ccache
 
       # ---------------------------------------------------------------
-      # 1) branch 내 최신 릴리스 버전 자동 탐색 (또는 version_pin 사용)
+      # 1) snapshots에서 SDK/ImageBuilder 파일명 자동 탐색
+      #    (release 버전 개념이 없으므로 branch/version_pin 없이 항상
+      #    downloads.immortalwrt.org/snapshots/targets/... 를 그대로 사용)
       # ---------------------------------------------------------------
-      - name: 최신 릴리스 버전 및 SDK/ImageBuilder 파일명 자동 탐색
+      - name: SDK/ImageBuilder 파일명 자동 탐색 (snapshots)
         id: resolve
         run: |
           set -euo pipefail
 
-          if [ -n "${VERSION_PIN}" ]; then
-            VERSION="${VERSION_PIN}"
-            echo "버전 강제 고정: ${VERSION}"
-          else
-            INDEX_HTML=$(curl -fsSL "https://downloads.immortalwrt.org/releases/")
-            VERSION=$(echo "${INDEX_HTML}" \
-              | grep -oE "href=\"${BRANCH}\.[0-9]+/\"" \
-              | sed -E 's/href="(.*)\/"/\1/' \
-              | sort -V | tail -n1)
-            if [ -z "${VERSION}" ]; then
-              echo "::error::${BRANCH} 브랜치에서 릴리스 버전을 찾지 못했습니다."
-              exit 1
-            fi
-            echo "자동 선택된 최신 버전: ${VERSION}"
-          fi
-
-          DOWNLOAD_BASE="https://downloads.immortalwrt.org/releases/${VERSION}/targets/${TARGET}/${SUBTARGET}"
+          DOWNLOAD_BASE="https://downloads.immortalwrt.org/snapshots/targets/${TARGET}/${SUBTARGET}"
           PAGE=$(curl -fsSL "${DOWNLOAD_BASE}/")
 
           IB_FILE=$(echo "${PAGE}" | grep -oE "immortalwrt-imagebuilder-[^\"]+\.tar\.zst" | head -n1)
           SDK_FILE=$(echo "${PAGE}" | grep -oE "immortalwrt-sdk-[^\"]+\.tar\.zst" | head -n1)
 
           if [ -z "${IB_FILE}" ] || [ -z "${SDK_FILE}" ]; then
-            echo "::error::${TARGET}/${SUBTARGET} 용 ImageBuilder/SDK 파일을 ${VERSION}에서 찾지 못했습니다."
+            echo "::error::${TARGET}/${SUBTARGET} 용 ImageBuilder/SDK 파일을 snapshots에서 찾지 못했습니다."
             echo "${PAGE}"
             exit 1
           fi
+
+          # 캐시 키/아티팩트명/릴리스 태그에 쓸 라벨. snapshots는 버전 번호가 없으므로
+          # 빌드 날짜(UTC)로 대체한다. 같은 날 재실행 시 SDK/IB 다운로드 캐시가
+          # 재사용되도록 시각까지는 넣지 않는다.
+          VERSION="snapshot-$(date -u +%Y%m%d)"
 
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "download_base=${DOWNLOAD_BASE}" >> "$GITHUB_OUTPUT"
@@ -338,7 +322,6 @@ jobs:
           echo "arch_packages=${ARCH_PACKAGES}" >> "$GITHUB_OUTPUT"
           echo "판별된 아키텍처: ${ARCH_PACKAGES}"
 
-          NIKKI_BRANCH="openwrt-${BRANCH}"
           NIKKI_FEED_URL="${NIKKI_PAGES}/${NIKKI_BRANCH}/${ARCH_PACKAGES}/nikki"
 
           # ImmortalWrt/OpenWrt는 25.12부터 패키지 매니저가 opkg에서 apk로 바뀌었다.
@@ -367,9 +350,20 @@ jobs:
             echo "# CONFIG_SIGNATURE_CHECK is not set" >> .config
 
             # nikki는 원격 피드이므로 repositories 파일에 등록한다.
-            # opkg의 repositories.conf와 달리 "src/gz 이름 URL" 문법이 아니라
-            # packages.adb가 있는 기준 URL 한 줄만 추가하면 된다.
-            echo "${NIKKI_FEED_URL}" >> repositories
+            #
+            # 중요: apk는 저장소 URL이 "기본 인덱스 이름(APKINDEX.tar.gz)"을 쓰는
+            # 일반 저장소라고 판단되면, 설정한 URL 뒤에 "<arch>/APKINDEX.tar.gz"를
+            # *자동으로 덧붙인다*. NIKKI_FEED_URL은 이미 "${NIKKI_BRANCH}/${ARCH_PACKAGES}/nikki"
+            # 처럼 arch가 경로에 포함되어 있으므로, 여기에 그대로 등록하면 apk가
+            # arch를 한 번 더 붙여 ".../nikki/${ARCH_PACKAGES}/APKINDEX.tar.gz"라는
+            # 잘못된 이중 경로로 요청하게 되고, 결국 404 → "file format is invalid or
+            # inconsistent" / "unable to select packages: nikki (no such package)"
+            # 오류로 이어진다.
+            #
+            # nikki 공식 feed.sh도 apk 쪽에서는 저장소를 등록할 때 "$feed_url/packages.adb"
+            # 처럼 인덱스 파일명을 명시적으로 지정한다. 이렇게 하면 apk가 해당 URL을
+            # "그 자체가 인덱스 파일"로 인식해 arch를 추가로 붙이지 않고 그대로 요청한다.
+            echo "${NIKKI_FEED_URL}/packages.adb" >> repositories
             echo "── repositories ──"
             cat repositories
           else
@@ -480,7 +474,8 @@ jobs:
           target=${TARGET}
           subtarget=${SUBTARGET}
           profile=${PROFILE}
-          branch=${BRANCH}
+          source=snapshots
+          nikki_branch=${NIKKI_BRANCH}
           arch_packages=${{ steps.repo.outputs.arch_packages }}
           pkg_manager=${{ steps.repo.outputs.pkg_manager }}
           download_base=${{ steps.resolve.outputs.download_base }}
