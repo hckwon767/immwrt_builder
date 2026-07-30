@@ -14,7 +14,7 @@ on:
       profile:
         description: "프로필 (예: asus_tuf-ax4200q, xunlong_orangepi-zero3)"
         required: true
-        default: "asus_tuf-ax4200q"
+        default: "cudy_tr3000-v1"
       hostname:
         description: "장치 호스트네임"
         required: true
