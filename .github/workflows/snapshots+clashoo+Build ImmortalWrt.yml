@@ -228,18 +228,69 @@ jobs:
           ./scripts/feeds list -s > ../feeds-list.log || true
 
           # --- clashoo 한국어(ko) 번역 주입 ---
-          # feeds update로 받은 clashoo feed의 실제 소스 위치는
-          # feeds/<feed명>/luci-app-clashoo/po/ 이다 (package/feeds/...는 그 심볼릭 링크).
-          # 여기에 po/ko/clashoo.po를 추가해두면, luci-app-clashoo 컴파일 시
-          # LuCI 빌드 시스템이 자동으로 luci-i18n-clashoo-ko 서브패키지를 만들어준다.
-          CLASHOO_PO_DIR="feeds/clashoo/${CLASHOO_LUCI_PKG}/po/ko"
-          if [ ! -d "feeds/clashoo/${CLASHOO_LUCI_PKG}" ]; then
-            echo "::error::feeds/clashoo/${CLASHOO_LUCI_PKG} 를 찾지 못했습니다. feed 구조가 바뀌었을 수 있습니다."
+          # clashoo의 luci-app-clashoo/Makefile은 표준 luci.mk 자동 i18n 스캔 방식이 아니라
+          # zh-cn 전용 패키지(Package/luci-i18n-clashoo-zh-cn)가 수동으로 하드코딩되어 있다.
+          # 따라서 po/ko/clashoo.po 파일만 추가해서는 luci-i18n-clashoo-ko 패키지가
+          # 생성되지 않는다. po 파일 추가 + Makefile에 ko용 패키지 정의(po2lmo 라인,
+          # Package/luci-i18n-clashoo-ko 블록, BuildPackage 등록)를 함께 패치해야 한다.
+          CLASHOO_LUCI_DIR="feeds/clashoo/${CLASHOO_LUCI_PKG}"
+          if [ ! -d "${CLASHOO_LUCI_DIR}" ]; then
+            echo "::error::${CLASHOO_LUCI_DIR} 를 찾지 못했습니다. feed 구조가 바뀌었을 수 있습니다."
             exit 1
           fi
+
+          CLASHOO_PO_DIR="${CLASHOO_LUCI_DIR}/po/ko"
           mkdir -p "${CLASHOO_PO_DIR}"
           curl -fsSL --retry 3 "${CLASHOO_PO_URL}" -o "${CLASHOO_PO_DIR}/clashoo.po"
           echo "clashoo 한국어 po 적용됨: ${CLASHOO_PO_DIR}/clashoo.po ($(grep -c '^msgid ' "${CLASHOO_PO_DIR}/clashoo.po") 개 문자열)"
+
+          python3 - "${CLASHOO_LUCI_DIR}/Makefile" <<'PYEOF'
+          import sys, pathlib
+
+          mk_path = pathlib.Path(sys.argv[1])
+          text = mk_path.read_text()
+
+          zh_line = "\tpo2lmo ./po/zh-cn/clashoo.po $(PKG_BUILD_DIR)/clashoo.zh-cn.lmo\n"
+          ko_line = "\tpo2lmo ./po/ko/clashoo.po $(PKG_BUILD_DIR)/clashoo.ko.lmo\n"
+
+          if ko_line not in text:
+              if zh_line not in text:
+                  sys.exit("ERROR: zh-cn po2lmo 라인을 찾지 못했습니다. Makefile 형식이 바뀐 것 같습니다.")
+              text = text.replace(zh_line, zh_line + ko_line, 1)
+
+          if "Package/luci-i18n-clashoo-ko" not in text:
+              ko_block = '''
+          define Package/luci-i18n-clashoo-ko
+          \tSECTION:=luci
+          \tCATEGORY:=LuCI
+          \tTITLE:=luci-app-clashoo - Korean (ko)
+          \tDEPENDS:=+luci-app-clashoo
+          \tPKGARCH:=all
+          endef
+
+          define Package/luci-i18n-clashoo-ko/install
+          \t$(INSTALL_DIR) $(1)/usr/lib/lua/luci/i18n
+          \t$(INSTALL_DATA) $(PKG_BUILD_DIR)/clashoo.ko.lmo $(1)/usr/lib/lua/luci/i18n/clashoo.ko.lmo
+          endef
+
+          define Package/luci-i18n-clashoo-ko/postinst
+          #!/bin/sh
+          if [ -z "$${IPKG_INSTROOT}" ]; then
+          \trm -rf /tmp/luci*
+          fi
+          exit 0
+          endef
+
+          $(eval $(call BuildPackage,luci-i18n-clashoo-ko))
+          '''
+              text = text.rstrip("\n") + "\n" + ko_block
+
+          mk_path.write_text(text)
+          print("Makefile 패치 완료:", mk_path)
+          PYEOF
+
+          echo "── 패치된 Makefile (마지막 30줄) ──"
+          tail -n 30 "${CLASHOO_LUCI_DIR}/Makefile"
 
           # ccache 활성화 (호스트에 ccache가 설치되어 있으면 SDK가 자동으로 감지해 사용한다)
           echo "CONFIG_CCACHE=y" >> .config
