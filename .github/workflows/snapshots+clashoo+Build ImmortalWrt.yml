@@ -18,7 +18,7 @@ on:
       hostname:
         description: "장치 호스트네임"
         required: true
-        default: "ASUS_VPNBOX"
+        default: "VPNBOX"
 
 permissions:
   contents: write
