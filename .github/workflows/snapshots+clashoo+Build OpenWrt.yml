@@ -1,0 +1,511 @@
+name: snapshots+clashoo+Build OpenWrt (SDK + ImageBuilder)
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "타겟 (예: mediatek, sunxi)"
+        required: true
+        default: "mediatek"
+      subtarget:
+        description: "서브타겟 (예: filogic, cortexa53)"
+        required: true
+        default: "filogic"
+      profile:
+        description: "프로필 (예: asus_tuf-ax4200q, xunlong_orangepi-zero3)"
+        required: true
+        default: "cudy_tr3000-v1"
+      hostname:
+        description: "장치 호스트네임"
+        required: true
+        default: "VPNBOX"
+
+permissions:
+  contents: write
+
+env:
+  TARGET: ${{ inputs.target }}
+  SUBTARGET: ${{ inputs.subtarget }}
+  PROFILE: ${{ inputs.profile }}
+  # 항상 downloads.openwrt.org/snapshots(마스터 브랜치 스냅샷)에서 받아 빌드하므로
+  # 릴리스 버전 선택은 필요 없다.
+  DEVICE_HOSTNAME: ${{ inputs.hostname }}
+  DEVICE_TZ: "Asia/Shanghai"
+  LUCI_LANG: "ko"
+  # openwrt 공식 luci-theme-material. 공식 opkg/apk 피드에 이미 포함되어 있으므로
+  # SDK에서 소스로 컴파일할 필요 없이 ImageBuilder PACKAGES 목록에 넣기만 하면 된다.
+  THEME_PKG: luci-theme-material
+  # 부팅 시 material 테마의 기본 로고(logo.png)를 이 URL의 이미지로 교체한다.
+  # ImageBuilder FILES 오버레이로 덮어쓰므로 테마 패키지를 직접 건드리지 않는다.
+  BRAND_URL: https://raw.githubusercontent.com/hckwon767/immwrt_builder/refs/heads/main/openwrtbrand.png
+  # clashoo는 nikki와 달리 별도의 프리빌트 opkg/apk 피드가 없다.
+  # 저장소 자체가 OpenWrt 피드 구조(clashoo/, luci-app-clashoo/)이므로
+  # SDK feeds에 등록해 소스에서 직접 컴파일한다 (README의 "소스 컴파일" 방식).
+  CLASHOO_REPO: https://github.com/kenzok8/openwrt-clashoo.git
+  CLASHOO_PKG: clashoo
+  CLASHOO_LUCI_PKG: luci-app-clashoo
+  # luci-app-clashoo는 기본적으로 중국어(zh-cn) 위주라, 한국어 po 번역을
+  # feed 소스에 주입해서 luci-i18n-clashoo-ko 서브패키지를 함께 빌드한다.
+  CLASHOO_LUCI_I18N_KO_PKG: luci-i18n-clashoo-ko
+  CLASHOO_PO_URL: https://raw.githubusercontent.com/hckwon767/immwrt_builder/refs/heads/main/clashoo.po
+  # zashboard 패널 다운로드 URL을 사용자 커스텀 빌드로 교체 (panel_download.sh 패치용)
+  CLASHOO_DASHBOARD_KO_URL: https://github.com/hckwon767/dashboard-ko/releases/latest/download/zashboard-ko.zip
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: 호스트 빌드 의존성 설치
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang flex bison g++ gawk \
+            gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev \
+            python3-setuptools rsync swig unzip zlib1g-dev file wget curl zstd ccache
+
+      # ---------------------------------------------------------------
+      # 1) snapshots에서 SDK/ImageBuilder 파일명 자동 탐색
+      #    (release 버전 개념이 없으므로 branch/version_pin 없이 항상
+      #    downloads.openwrt.org/snapshots/targets/... 를 그대로 사용)
+      # ---------------------------------------------------------------
+      - name: SDK/ImageBuilder 파일명 자동 탐색 (snapshots)
+        id: resolve
+        run: |
+          set -euo pipefail
+
+          DOWNLOAD_BASE="https://downloads.openwrt.org/snapshots/targets/${TARGET}/${SUBTARGET}"
+          PAGE=$(curl -fsSL "${DOWNLOAD_BASE}/")
+
+          IB_FILE=$(echo "${PAGE}" | grep -oE "openwrt-imagebuilder-[^\"]+\.tar\.zst" | head -n1)
+          SDK_FILE=$(echo "${PAGE}" | grep -oE "openwrt-sdk-[^\"]+\.tar\.zst" | head -n1)
+
+          if [ -z "${IB_FILE}" ] || [ -z "${SDK_FILE}" ]; then
+            echo "::error::${TARGET}/${SUBTARGET} 용 ImageBuilder/SDK 파일을 snapshots에서 찾지 못했습니다."
+            echo "${PAGE}"
+            exit 1
+          fi
+
+          # 캐시 키/아티팩트명/릴리스 태그에 쓸 라벨. snapshots는 버전 번호가 없으므로
+          # 빌드 날짜(UTC)로 대체한다. 같은 날 재실행 시 SDK/IB 다운로드 캐시가
+          # 재사용되도록 시각까지는 넣지 않는다.
+          VERSION="snapshot-$(date -u +%Y%m%d)"
+
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "download_base=${DOWNLOAD_BASE}" >> "$GITHUB_OUTPUT"
+          echo "ib_file=${IB_FILE}" >> "$GITHUB_OUTPUT"
+          echo "sdk_file=${SDK_FILE}" >> "$GITHUB_OUTPUT"
+          echo "ib_url=${DOWNLOAD_BASE}/${IB_FILE}" >> "$GITHUB_OUTPUT"
+          echo "sdk_url=${DOWNLOAD_BASE}/${SDK_FILE}" >> "$GITHUB_OUTPUT"
+
+      - name: 다운로드 캐시
+        uses: actions/cache@v4
+        with:
+          path: |
+            sdk.tar.zst
+            imagebuilder.tar.zst
+          key: openwrt-${{ steps.resolve.outputs.version }}-${{ env.TARGET }}-${{ env.SUBTARGET }}
+
+      # ccache: 동일/유사 소스 재컴파일 시 컴파일러 호출 결과를 재사용해 빌드 시간을 크게 줄인다.
+      # clashoo는 mihomo(Go/Rust 기반) 등 소스 컴파일 비중이 nikki보다 크므로
+      # ccache의 효과가 더 중요하다.
+      - name: ccache 캐시
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-${{ env.TARGET }}-${{ env.SUBTARGET }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-${{ env.TARGET }}-${{ env.SUBTARGET }}-
+
+      # 패키지 소스 아카이브(dl/) 캐시: feeds/패키지 컴파일 시 매번 새로 받는
+      # 업스트림 소스 tarball을 재사용한다 (clashoo가 받는 mihomo 소스 tarball 포함).
+      - name: 패키지 소스(dl) 캐시
+        uses: actions/cache@v4
+        with:
+          path: sdk/dl
+          key: dl-${{ env.TARGET }}-${{ env.SUBTARGET }}-${{ steps.resolve.outputs.version }}
+          restore-keys: |
+            dl-${{ env.TARGET }}-${{ env.SUBTARGET }}-
+
+      - name: ccache 환경 설정
+        run: |
+          mkdir -p ~/.ccache
+          echo "USE_CCACHE=1" >> "$GITHUB_ENV"
+          echo "CCACHE_DIR=$HOME/.ccache" >> "$GITHUB_ENV"
+          echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+          # 컴파일 커맨드가 매번 미묘하게 달라지는 상황(타임스탬프 등)에서도
+          # 캐시 적중률을 높이기 위한 완화 옵션
+          echo "CCACHE_COMPRESS=1" >> "$GITHUB_ENV"
+          echo "CCACHE_SLOPPINESS=file_macro,time_macros,include_file_mtime,include_file_ctime,pch_defines" >> "$GITHUB_ENV"
+          ccache -M 5G
+          ccache -z
+
+      # ---------------------------------------------------------------
+      # 2) SDK 단계: clashoo / luci-app-clashoo 컴파일
+      #    material 테마는 openwrt 공식 opkg/apk 피드에 이미 포함되어 있으므로
+      #    SDK에서 소스로 컴파일하지 않는다 (ImageBuilder PACKAGES에서 바로 설치).
+      #    nikki와 달리 clashoo는 별도의 프리빌트 opkg/apk 피드가 없으므로
+      #    clashoo(런타임, mihomo 내장)와 luci-app-clashoo(LuCI 프론트/백엔드)
+      #    모두 SDK에서 소스로 직접 컴파일한다.
+      #    ※ SDK는 다운로드한 시점의 .config에 따라 opkg/apk 중 하나로 이미
+      #      고정되어 있으므로(24.10=opkg, 25.x=apk), 이 단계 자체는 두 경우
+      #      모두 동일한 make 커맨드로 동작한다. 산출물 확장자만 .ipk/.apk로 달라진다.
+      # ---------------------------------------------------------------
+      - name: SDK 다운로드 및 압축 해제
+        run: |
+          set -euo pipefail
+          [ -f sdk.tar.zst ] || curl -fsSL -o sdk.tar.zst "${{ steps.resolve.outputs.sdk_url }}"
+          mkdir -p sdk
+          tar --use-compress-program=unzstd -xf sdk.tar.zst -C sdk --strip-components=1
+          # ImageBuilder tarball에는 이 스크립트가 없으므로 SDK에서 미리 복사해둔다
+          # (opkg 인덱스 생성용. apk 빌드에서는 사용하지 않지만 SDK 소스 트리에는
+          #  패키지 매니저 종류와 무관하게 항상 존재하는 스크립트라 복사 자체는 안전하다)
+          cp sdk/scripts/ipkg-make-index.sh ./ipkg-make-index.sh
+          chmod +x ./ipkg-make-index.sh
+
+          # ipkg-make-index.sh는 원래 build system이 만들어주는 host/mkhash 툴을
+          # $MKHASH 환경변수로 넘겨 받아 "$MKHASH sha256 <file>" 형태로 호출한다.
+          # SDK 단독 실행 시엔 이 값이 없으므로 sha256sum을 감싼 래퍼로 대체한다.
+          cat > ./mkhash <<'MKHASH_EOF'
+          #!/bin/sh
+          algo="$1"; shift
+          case "$algo" in
+            sha256) sha256sum "$1" | cut -d' ' -f1 ;;
+            md5) md5sum "$1" | cut -d' ' -f1 ;;
+            *) echo "mkhash: unsupported algo $algo" >&2; exit 1 ;;
+          esac
+          MKHASH_EOF
+          chmod +x ./mkhash
+          echo "MKHASH=$(pwd)/mkhash" >> "$GITHUB_ENV"
+
+      - name: clashoo 피드 등록
+        run: |
+          set -euo pipefail
+          # openwrt-clashoo 저장소 자체가 clashoo/, luci-app-clashoo/ 를 담은
+          # OpenWrt feed 구조이므로 feeds.conf.default에 등록하는 것만으로
+          # feeds update/install 시 두 패키지가 함께 인식된다.
+          echo "src-git clashoo ${CLASHOO_REPO}" >> sdk/feeds.conf.default
+          cat sdk/feeds.conf.default
+
+      - name: SDK feeds 업데이트/설치 및 clashoo 패키지 컴파일
+        run: |
+          set -euo pipefail
+          cd sdk
+          ./scripts/feeds update -a 2>&1 | tee ../feeds-update.log
+          ./scripts/feeds install -a 2>&1 | tee ../feeds-install.log
+          ./scripts/feeds list -s > ../feeds-list.log || true
+
+          # --- clashoo 한국어(ko) 번역 주입 ---
+          # clashoo의 luci-app-clashoo/Makefile은 표준 luci.mk 자동 i18n 스캔 방식이 아니라
+          # zh-cn 전용 패키지(Package/luci-i18n-clashoo-zh-cn)가 수동으로 하드코딩되어 있다.
+          # 따라서 po/ko/clashoo.po 파일만 추가해서는 luci-i18n-clashoo-ko 패키지가
+          # 생성되지 않는다. po 파일 추가 + Makefile에 ko용 패키지 정의(po2lmo 라인,
+          # Package/luci-i18n-clashoo-ko 블록, BuildPackage 등록)를 함께 패치해야 한다.
+          CLASHOO_LUCI_DIR="feeds/clashoo/${CLASHOO_LUCI_PKG}"
+          if [ ! -d "${CLASHOO_LUCI_DIR}" ]; then
+            echo "::error::${CLASHOO_LUCI_DIR} 를 찾지 못했습니다. feed 구조가 바뀌었을 수 있습니다."
+            exit 1
+          fi
+
+          CLASHOO_PO_DIR="${CLASHOO_LUCI_DIR}/po/ko"
+          mkdir -p "${CLASHOO_PO_DIR}"
+          curl -fsSL --retry 3 "${CLASHOO_PO_URL}" -o "${CLASHOO_PO_DIR}/clashoo.po"
+          echo "clashoo 한국어 po 적용됨: ${CLASHOO_PO_DIR}/clashoo.po ($(grep -c '^msgid ' "${CLASHOO_PO_DIR}/clashoo.po") 개 문자열)"
+
+          python3 - "${CLASHOO_LUCI_DIR}/Makefile" <<'PYEOF'
+          import sys, pathlib
+
+          mk_path = pathlib.Path(sys.argv[1])
+          text = mk_path.read_text()
+
+          zh_line = "\tpo2lmo ./po/zh-cn/clashoo.po $(PKG_BUILD_DIR)/clashoo.zh-cn.lmo\n"
+          ko_line = "\tpo2lmo ./po/ko/clashoo.po $(PKG_BUILD_DIR)/clashoo.ko.lmo\n"
+
+          if ko_line not in text:
+              if zh_line not in text:
+                  sys.exit("ERROR: zh-cn po2lmo 라인을 찾지 못했습니다. Makefile 형식이 바뀐 것 같습니다.")
+              text = text.replace(zh_line, zh_line + ko_line, 1)
+
+          if "Package/luci-i18n-clashoo-ko" not in text:
+              ko_block = '''
+          define Package/luci-i18n-clashoo-ko
+          \tSECTION:=luci
+          \tCATEGORY:=LuCI
+          \tTITLE:=luci-app-clashoo - Korean (ko)
+          \tDEPENDS:=+luci-app-clashoo
+          \tPKGARCH:=all
+          endef
+
+          define Package/luci-i18n-clashoo-ko/install
+          \t$(INSTALL_DIR) $(1)/usr/lib/lua/luci/i18n
+          \t$(INSTALL_DATA) $(PKG_BUILD_DIR)/clashoo.ko.lmo $(1)/usr/lib/lua/luci/i18n/clashoo.ko.lmo
+          endef
+
+          define Package/luci-i18n-clashoo-ko/postinst
+          #!/bin/sh
+          if [ -z "$${IPKG_INSTROOT}" ]; then
+          \trm -rf /tmp/luci*
+          fi
+          exit 0
+          endef
+
+          $(eval $(call BuildPackage,luci-i18n-clashoo-ko))
+          '''
+              text = text.rstrip("\n") + "\n" + ko_block
+
+          mk_path.write_text(text)
+          print("Makefile 패치 완료:", mk_path)
+          PYEOF
+
+          echo "── 패치된 Makefile (마지막 30줄) ──"
+          tail -n 30 "${CLASHOO_LUCI_DIR}/Makefile"
+
+          # --- clashoo 대시보드(zashboard) 다운로드 URL을 커스텀 빌드로 교체 ---
+          # 런타임에 라우터가 "패널 다운로드"를 실행할 때 참조하는 스크립트로,
+          # clashoo(런타임) 패키지의 files/ 오버레이에 포함되어 그대로 설치된다.
+          # zashboard 케이스와 기본값(*) 케이스 모두 같은 URLS 라인을 쓰므로 둘 다 치환한다.
+          # 원본 zashboard 릴리스는 폴백으로 남겨, 커스텀 빌드가 내려가 있어도 안전하게 동작하게 한다.
+          CLASHOO_DIR="feeds/clashoo/${CLASHOO_PKG}"
+          PANEL_SCRIPT="${CLASHOO_DIR}/files/usr/share/clashoo/update/panel_download.sh"
+          if [ ! -f "${PANEL_SCRIPT}" ]; then
+            echo "::error::${PANEL_SCRIPT} 를 찾지 못했습니다. clashoo 소스 구조가 바뀌었을 수 있습니다."
+            exit 1
+          fi
+
+          python3 - "${PANEL_SCRIPT}" "${CLASHOO_DASHBOARD_KO_URL}" <<'PYEOF'
+          import sys, pathlib
+
+          script_path = pathlib.Path(sys.argv[1])
+          custom_url = sys.argv[2]
+          text = script_path.read_text()
+
+          old_urls = 'URLS="https://github.com/Zephyruso/zashboard/releases/latest/download/dist.zip https://github.com/Zephyruso/zashboard/releases/latest/download/dist-cdn-fonts.zip"'
+          new_urls = 'URLS="' + custom_url + ' https://github.com/Zephyruso/zashboard/releases/latest/download/dist.zip"'
+
+          count = text.count(old_urls)
+          if count == 0:
+              sys.exit("ERROR: zashboard URLS 라인을 찾지 못했습니다. panel_download.sh 형식이 바뀐 것 같습니다.")
+
+          text = text.replace(old_urls, new_urls)
+          script_path.write_text(text)
+          print(f"panel_download.sh 패치 완료 ({count}곳 치환):", script_path)
+          PYEOF
+
+          echo "── 패치된 panel_download.sh (zashboard 관련 라인) ──"
+          grep -n "zashboard-ko\|URLS=" "${PANEL_SCRIPT}"
+
+          # ccache 활성화 (호스트에 ccache가 설치되어 있으면 SDK가 자동으로 감지해 사용한다)
+          echo "CONFIG_CCACHE=y" >> .config
+          make defconfig
+          make "package/${CLASHOO_PKG}/compile" -j"$(nproc)" V=s 2>&1 | tee ../sdk-build-clashoo.log
+          make "package/${CLASHOO_LUCI_PKG}/compile" -j"$(nproc)" V=s 2>&1 | tee ../sdk-build-clashoo-luci.log
+
+          echo "── ccache 통계 ──"
+          ccache -s || true
+
+      - name: 컴파일된 커스텀 ipk/apk 수집
+        id: theme_ipk
+        run: |
+          set -euo pipefail
+          # 24.10(opkg)에서는 .ipk, 25.x(apk)에서는 .apk로 산출물이 나오므로
+          # 두 확장자를 모두 찾는다. (material 테마는 공식 피드에서 바로 설치하므로
+          # 여기서는 clashoo 관련 패키지만 수집한다.)
+          mkdir -p custom-packages
+          find sdk/bin/packages \
+            \( -iname "${CLASHOO_PKG}*.ipk"    -o -iname "${CLASHOO_LUCI_PKG}*.ipk"    -o -iname "${CLASHOO_LUCI_I18N_KO_PKG}*.ipk" \
+               -o -iname "${CLASHOO_PKG}*.apk" -o -iname "${CLASHOO_LUCI_PKG}*.apk"    -o -iname "${CLASHOO_LUCI_I18N_KO_PKG}*.apk" \) \
+            -exec cp -f {} custom-packages/ \;
+          ls -la custom-packages/
+
+      # ---------------------------------------------------------------
+      # 3) ImageBuilder 단계
+      # ---------------------------------------------------------------
+      - name: ImageBuilder 다운로드 및 압축 해제
+        run: |
+          set -euo pipefail
+          [ -f imagebuilder.tar.zst ] || curl -fsSL -o imagebuilder.tar.zst "${{ steps.resolve.outputs.ib_url }}"
+          mkdir -p imagebuilder
+          tar --use-compress-program=unzstd -xf imagebuilder.tar.zst -C imagebuilder --strip-components=1
+
+      - name: 아키텍처 판별 및 로컬 피드 등록
+        id: repo
+        run: |
+          set -euo pipefail
+          cd imagebuilder
+
+          ARCH_PACKAGES=$(grep -oP '(?<=CONFIG_TARGET_ARCH_PACKAGES=")[^"]+' .config)
+          echo "arch_packages=${ARCH_PACKAGES}" >> "$GITHUB_OUTPUT"
+          echo "판별된 아키텍처: ${ARCH_PACKAGES}"
+
+          # clashoo는 nikki와 달리 원격 프리빌트 피드가 없다(SDK에서 이미
+          # clashoo/luci-app-clashoo를 직접 컴파일했으므로). material 테마는
+          # ImageBuilder가 기본으로 참조하는 공식 opkg/apk 피드에 이미 포함되어
+          # 있으므로 별도 등록이 필요 없다. 따라서 여기서는 로컬 custom-packages
+          # 피드(clashoo 전용)만 등록하면 된다.
+          #
+          # ImmortalWrt/OpenWrt는 25.12부터 패키지 매니저가 opkg에서 apk로 바뀌었다.
+          # 로컬 커스텀 피드 등록 방식, 서명 검증 끄는 방법, 인덱스 파일 형식이
+          # opkg와 apk에서 완전히 다르므로 여기서 분기 처리한다.
+          # (판별은 브랜치 문자열이 아니라 ImageBuilder 자체의 .config를 기준으로 한다)
+          if grep -qs '^CONFIG_USE_APK=y' .config; then
+            echo "패키지 매니저: apk"
+            echo "pkg_manager=apk" >> "$GITHUB_OUTPUT"
+
+            # apk 방식은 packages/ 디렉터리에 .apk 파일만 넣어두면 된다.
+            # make image 실행 시 ImageBuilder의 Makefile이 `apk mkndx`로
+            # packages.adb 인덱스를 자동 생성한다.
+            mkdir -p packages
+            cp -f ../custom-packages/*.apk packages/ 2>/dev/null || true
+            echo "── 로컬 apk 패키지 목록 ──"
+            ls -la packages/ || true
+
+            # 서명 검증 비활성화: 로컬 커스텀 패키지는 공식 서명 키로 서명되어
+            # 있지 않으므로 apk가 --allow-untrusted 없이는 설치를 거부한다.
+            sed -i '/CONFIG_SIGNATURE_CHECK/d' .config
+            echo "# CONFIG_SIGNATURE_CHECK is not set" >> .config
+          else
+            echo "패키지 매니저: opkg"
+            echo "pkg_manager=opkg" >> "$GITHUB_OUTPUT"
+
+            mkdir -p custom-packages
+            cp -f ../custom-packages/*.ipk custom-packages/ 2>/dev/null || true
+
+            # 주의: ipkg-make-index.sh에 넘기는 인자가 그대로 Packages의 Filename: 필드에
+            # 기록된다. 여기서 "custom-packages"라는 상대경로를 넘기면 Filename이
+            # "custom-packages/foo.ipk"로 기록되고, repositories.conf의 저장소 기준 URL이
+            # 이미 ".../imagebuilder/custom-packages"이므로 opkg가 두 경로를 이어붙여
+            # ".../custom-packages/custom-packages/foo.ipk"라는 잘못된 이중 경로로
+            # 다운로드를 시도하게 된다. 디렉터리 안에서 "."을 인자로 넘겨 이를 방지한다.
+            (cd custom-packages && ../../ipkg-make-index.sh . > Packages && gzip -9nk -f Packages)
+
+            # 서명 확인 비활성화: 로컬 커스텀 피드를 쓰기 위한 트레이드오프.
+            sed -i '/option check_signature/d' repositories.conf
+
+            echo "src/gz custom file://$(pwd)/custom-packages" | cat - repositories.conf > repositories.conf.new
+            mv repositories.conf.new repositories.conf
+
+            echo "── repositories.conf ──"
+            cat repositories.conf
+          fi
+
+      - name: 부팅시 기본값(uci-defaults) 생성
+        run: |
+          set -euo pipefail
+          mkdir -p imagebuilder/files/etc/uci-defaults
+          cat > imagebuilder/files/etc/uci-defaults/99-custom-defaults <<EOF
+          #!/bin/sh
+          uci set system.@system[0].hostname='${DEVICE_HOSTNAME}'
+          uci set system.@system[0].zonename='${DEVICE_TZ}'
+          uci set luci.main.lang='${LUCI_LANG}'
+          uci set luci.main.mediaurlbase='/luci-static/material'
+          uci commit system
+          uci commit luci
+          exit 0
+          EOF
+          chmod +x imagebuilder/files/etc/uci-defaults/99-custom-defaults
+
+      - name: material 테마 브랜드 로고 교체
+        run: |
+          set -euo pipefail
+          # luci-theme-material은 opkg/apk 공식 피드에서 그대로 설치하므로
+          # 패키지 소스를 건드리는 대신 ImageBuilder FILES 오버레이로 로고 파일만
+          # 덮어쓴다 (설치된 /www/luci-static/material/logo.png 를 rootfs 오버레이가 대체).
+          mkdir -p imagebuilder/files/www/luci-static/material
+          curl -L --retry 3 --fail "${BRAND_URL}" -o imagebuilder/files/www/luci-static/material/brand.png
+
+      - name: 이미지 빌드
+        id: image_build
+        run: |
+          set -euo pipefail
+          cd imagebuilder
+          PACKAGES="${THEME_PKG} luci-i18n-base-${LUCI_LANG} luci-mod-dashboard luci-i18n-dashboard-${LUCI_LANG} ${CLASHOO_PKG} ${CLASHOO_LUCI_PKG} ${CLASHOO_LUCI_I18N_KO_PKG}"
+          echo "${PACKAGES}" > ../packages-used.txt
+          make image \
+            PROFILE="${PROFILE}" \
+            PACKAGES="${PACKAGES}" \
+            FILES="files" \
+            -j"$(nproc)" V=s 2>&1 | tee ../image-build.log
+          ls -la bin/targets/*/*/
+
+      # ---------------------------------------------------------------
+      # 디버그 번들: config, feeds, repositories(.conf), 빌드 로그, 버전정보 등
+      # 나중에 "왜 이 빌드가 이렇게 나왔는지" 재현/디버깅하기 위한 전체 스냅샷
+      # ---------------------------------------------------------------
+      - name: 디버그 정보 번들 생성
+        run: |
+          set -euo pipefail
+          DBG=debug-info
+          mkdir -p "${DBG}/sdk" "${DBG}/imagebuilder"
+
+          # 버전/URL 해석 결과
+          cat > "${DBG}/resolve-info.txt" <<EOF
+          version=${{ steps.resolve.outputs.version }}
+          target=${TARGET}
+          subtarget=${SUBTARGET}
+          profile=${PROFILE}
+          source=snapshots
+          clashoo_repo=${CLASHOO_REPO}
+          arch_packages=${{ steps.repo.outputs.arch_packages }}
+          pkg_manager=${{ steps.repo.outputs.pkg_manager }}
+          download_base=${{ steps.resolve.outputs.download_base }}
+          ib_url=${{ steps.resolve.outputs.ib_url }}
+          sdk_url=${{ steps.resolve.outputs.sdk_url }}
+          hostname=${DEVICE_HOSTNAME}
+          timezone=${DEVICE_TZ}
+          luci_lang=${LUCI_LANG}
+          EOF
+
+          # SDK 쪽 설정/피드 정보
+          cp -f sdk/.config "${DBG}/sdk/.config" 2>/dev/null || true
+          cp -f sdk/feeds.conf.default "${DBG}/sdk/feeds.conf.default" 2>/dev/null || true
+          cp -f feeds-update.log feeds-install.log feeds-list.log sdk-build-clashoo.log sdk-build-clashoo-luci.log "${DBG}/sdk/" 2>/dev/null || true
+
+          # ImageBuilder 쪽 설정/피드/빌드 정보 (opkg: repositories.conf / apk: repositories)
+          cp -f imagebuilder/.config "${DBG}/imagebuilder/.config" 2>/dev/null || true
+          cp -f imagebuilder/repositories.conf "${DBG}/imagebuilder/repositories.conf" 2>/dev/null || true
+          cp -f imagebuilder/repositories "${DBG}/imagebuilder/repositories" 2>/dev/null || true
+          cp -rf imagebuilder/files "${DBG}/imagebuilder/files" 2>/dev/null || true
+          cp -f imagebuilder/custom-packages/Packages* "${DBG}/imagebuilder/" 2>/dev/null || true
+          cp -f imagebuilder/packages/packages.adb "${DBG}/imagebuilder/" 2>/dev/null || true
+          cp -f packages-used.txt image-build.log "${DBG}/imagebuilder/" 2>/dev/null || true
+          find imagebuilder/bin/targets -maxdepth 3 \
+            \( -iname "*.manifest" -o -iname "*buildinfo*" -o -iname "profiles.json" -o -iname "sha256sums" \) \
+            -exec cp -f {} "${DBG}/imagebuilder/" \; 2>/dev/null || true
+
+          tar -czf debug-info.tar.gz "${DBG}"
+          ls -la debug-info.tar.gz
+
+      - name: 산출물 업로드 (아티팩트)
+        uses: actions/upload-artifact@v4
+        with:
+          name: openwrt-${{ steps.resolve.outputs.version }}-${{ env.TARGET }}-${{ env.SUBTARGET }}-${{ env.PROFILE }}
+          path: |
+            imagebuilder/bin/targets/**
+            debug-info.tar.gz
+
+      # ---------------------------------------------------------------
+      # 4) GitHub Release 자동 생성
+      # ---------------------------------------------------------------
+      - name: 릴리스 태그 생성
+        id: tag
+        run: |
+          echo "tag=${{ steps.resolve.outputs.version }}-${TARGET}-${SUBTARGET}-${PROFILE}-$(date +%Y%m%d%H%M)" >> "$GITHUB_OUTPUT"
+
+      - name: GitHub Release 생성
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: "OpenWrt ${{ steps.resolve.outputs.version }} - ${{ env.PROFILE }}"
+          body: |
+            - Base: OpenWrt ${{ steps.resolve.outputs.version }}
+            - Target/Subtarget: ${{ env.TARGET }}/${{ env.SUBTARGET }}
+            - Profile: ${{ env.PROFILE }}
+            - Package manager: ${{ steps.repo.outputs.pkg_manager }}
+            - Theme: luci-theme-material (official feed, custom logo.png via FILES overlay)
+            - Proxy app: clashoo (mihomo + sing-box, source compiled)
+            - Hostname: ${{ env.DEVICE_HOSTNAME }} / Timezone: ${{ env.DEVICE_TZ }} / LuCI lang: ${{ env.LUCI_LANG }}
+            - debug-info.tar.gz 안에 .config / repositories(.conf) / feeds 로그 / 빌드 로그 / manifest·buildinfo 포함 (디버그용)
+          files: |
+            imagebuilder/bin/targets/**/*
+            debug-info.tar.gz
