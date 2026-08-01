@@ -1,0 +1,527 @@
+name: clashoo+Build OpenWrt (SDK + ImageBuilder)
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "타겟 (예: mediatek, sunxi)"
+        required: true
+        default: "mediatek"
+      subtarget:
+        description: "서브타겟 (예: filogic, cortexa53)"
+        required: true
+        default: "filogic"
+      profile:
+        description: "프로필 (예: asus_tuf-ax4200q, xunlong_orangepi-zero3)"
+        required: true
+        default: "asus_tuf-ax4200q"
+      branch:
+        description: "추적할 마이너 릴리스 브랜치 (예: 24.10) - 이 안에서 최신 패치버전을 자동 탐색"
+        required: true
+        default: "25.12"
+      version_pin:
+        description: "특정 버전 강제 고정 (예: 24.10.5). 비워두면 branch 내 최신 자동 선택"
+        required: false
+        default: ""
+      hostname:
+        description: "장치 호스트네임"
+        required: true
+        default: "ASUS_VPNBOX"
+
+permissions:
+  contents: write
+
+env:
+  TARGET: ${{ inputs.target }}
+  SUBTARGET: ${{ inputs.subtarget }}
+  PROFILE: ${{ inputs.profile }}
+  BRANCH: ${{ inputs.branch }}
+  VERSION_PIN: ${{ inputs.version_pin }}
+  DEVICE_HOSTNAME: ${{ inputs.hostname }}
+  DEVICE_TZ: "Asia/Shanghai"
+  LUCI_LANG: "ko"
+  THEME_REPO: https://github.com/derisamedia/luci-theme-alpha
+  THEME_PKG: luci-theme-alpha
+  THEME_CONFIG_REPO: https://github.com/animegasan/luci-app-alpha-config
+  THEME_CONFIG_PKG: luci-app-alpha-config
+  BRAND_BASE_URL: https://raw.githubusercontent.com/hckwon767/immwrt_builder/refs/heads/main
+  CLASHOO_REPO: https://github.com/kenzok8/openwrt-clashoo.git
+  CLASHOO_CLONE_DIR: openwrt-clashoo
+  CLASHOO_CORE_PKG: clashoo
+  CLASHOO_LUCI_PKG: luci-app-clashoo
+  # luci-app-clashoo 한국어 번역 (po/ko/clashoo.po 로 배치하면 LuCI 빌드 시스템이
+  # 자동으로 luci-i18n-clashoo-ko 패키지를 생성한다 - luci-i18n-clashoo-zh-cn과 동일한 방식)
+  CLASHOO_PO_URL: https://raw.githubusercontent.com/hckwon767/immwrt_builder/refs/heads/main/clashoo.po
+  CLASHOO_I18N_KO_PKG: luci-i18n-clashoo-ko
+  DASHBOARD_KO_URL: https://github.com/hckwon767/dashboard-ko/releases/latest/download/zashboard-ko.zip
+  DASHBOARD_KO_LABEL: "Zashboard (한국어)"
+  # clashoo가 요구하는 mihomo Country.mmdb 기본 소스 (MetaCubeX 공식 geoip 릴리스)
+  COUNTRY_MMDB_URL: https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/country.mmdb
+  # 아래 두 값은 clashoo 저장소 구조에서 실제 경로를 찾지 못했을 때 쓰는 대체(fallback) 값이다.
+  # (저장소 README 상 "files/usr/share/clashoo/" 아래에 update 스크립트가 있다는 것만 공개되어 있어,
+  #  Country.mmdb / 대시보드가 정확히 어느 하위 경로를 쓰는지는 빌드 시점에 소스를 직접 grep해서 탐지한다.)
+  FALLBACK_MMDB_DIR: /usr/share/clashoo
+  FALLBACK_DASHBOARD_DIR: /usr/share/clashoo/ui/zashboard
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: 호스트 빌드 의존성 설치
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang flex bison g++ gawk \
+            gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev \
+            python3-setuptools rsync swig unzip zlib1g-dev file wget curl zstd ccache
+
+      # ---------------------------------------------------------------
+      # 1) branch 내 최신 릴리스 버전 자동 탐색 (또는 version_pin 사용)
+      #    ※ ImmortalWrt -> OpenWrt 로 빌드 소스 변경
+      # ---------------------------------------------------------------
+      - name: 최신 릴리스 버전 및 SDK/ImageBuilder 파일명 자동 탐색
+        id: resolve
+        run: |
+          set -euo pipefail
+
+          if [ -n "${VERSION_PIN}" ]; then
+            VERSION="${VERSION_PIN}"
+            echo "버전 강제 고정: ${VERSION}"
+          else
+            INDEX_HTML=$(curl -fsSL "https://downloads.openwrt.org/releases/")
+            VERSION=$(echo "${INDEX_HTML}" \
+              | grep -oE "href=\"${BRANCH}\.[0-9]+/\"" \
+              | sed -E 's/href="(.*)\/"/\1/' \
+              | sort -V | tail -n1)
+            if [ -z "${VERSION}" ]; then
+              echo "::error::${BRANCH} 브랜치에서 릴리스 버전을 찾지 못했습니다."
+              exit 1
+            fi
+            echo "자동 선택된 최신 버전: ${VERSION}"
+          fi
+
+          DOWNLOAD_BASE="https://downloads.openwrt.org/releases/${VERSION}/targets/${TARGET}/${SUBTARGET}"
+          PAGE=$(curl -fsSL "${DOWNLOAD_BASE}/")
+
+          IB_FILE=$(echo "${PAGE}" | grep -oE "openwrt-imagebuilder-[^\"]+\.tar\.zst" | head -n1)
+          SDK_FILE=$(echo "${PAGE}" | grep -oE "openwrt-sdk-[^\"]+\.tar\.zst" | head -n1)
+
+          if [ -z "${IB_FILE}" ] || [ -z "${SDK_FILE}" ]; then
+            echo "::error::${TARGET}/${SUBTARGET} 용 ImageBuilder/SDK 파일을 ${VERSION}에서 찾지 못했습니다."
+            echo "${PAGE}"
+            exit 1
+          fi
+
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "download_base=${DOWNLOAD_BASE}" >> "$GITHUB_OUTPUT"
+          echo "ib_file=${IB_FILE}" >> "$GITHUB_OUTPUT"
+          echo "sdk_file=${SDK_FILE}" >> "$GITHUB_OUTPUT"
+          echo "ib_url=${DOWNLOAD_BASE}/${IB_FILE}" >> "$GITHUB_OUTPUT"
+          echo "sdk_url=${DOWNLOAD_BASE}/${SDK_FILE}" >> "$GITHUB_OUTPUT"
+
+      - name: 다운로드 캐시
+        uses: actions/cache@v4
+        with:
+          path: |
+            sdk.tar.zst
+            imagebuilder.tar.zst
+          key: openwrt-${{ steps.resolve.outputs.version }}-${{ env.TARGET }}-${{ env.SUBTARGET }}
+
+      # ccache: 동일/유사 소스 재컴파일 시 컴파일러 호출 결과를 재사용해 빌드 시간을 크게 줄인다.
+      - name: ccache 캐시
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-${{ env.TARGET }}-${{ env.SUBTARGET }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-${{ env.TARGET }}-${{ env.SUBTARGET }}-
+
+      - name: 패키지 소스(dl) 캐시
+        uses: actions/cache@v4
+        with:
+          path: sdk/dl
+          key: dl-${{ env.TARGET }}-${{ env.SUBTARGET }}-${{ steps.resolve.outputs.version }}
+          restore-keys: |
+            dl-${{ env.TARGET }}-${{ env.SUBTARGET }}-
+
+      - name: ccache 환경 설정
+        run: |
+          mkdir -p ~/.ccache
+          echo "USE_CCACHE=1" >> "$GITHUB_ENV"
+          echo "CCACHE_DIR=$HOME/.ccache" >> "$GITHUB_ENV"
+          echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+          echo "CCACHE_COMPRESS=1" >> "$GITHUB_ENV"
+          echo "CCACHE_SLOPPINESS=file_macro,time_macros,include_file_mtime,include_file_ctime,pch_defines" >> "$GITHUB_ENV"
+          ccache -M 5G
+          ccache -z
+
+      # ---------------------------------------------------------------
+      # 2) SDK 단계: luci-theme-alpha 컴파일 (brand.png 교체 포함) +
+      #    clashoo / luci-app-clashoo 컴파일
+      #    (nikki와 달리 clashoo는 외부 opkg 프리빌트 피드가 아니라
+      #     저장소를 직접 클론해 SDK에서 코어까지 함께 컴파일한다 - 공식 README 방식)
+      # ---------------------------------------------------------------
+      - name: SDK 다운로드 및 압축 해제
+        run: |
+          set -euo pipefail
+          [ -f sdk.tar.zst ] || curl -fsSL -o sdk.tar.zst "${{ steps.resolve.outputs.sdk_url }}"
+          mkdir -p sdk
+          tar --use-compress-program=unzstd -xf sdk.tar.zst -C sdk --strip-components=1
+
+          # OpenWrt 25.x부터 기본 패키지 매니저가 opkg(.ipk) -> apk(.apk)로 전환되었으므로,
+          # 실제 다운로드된 SDK의 .config에서 CONFIG_USE_APK 값을 읽어 자동으로 분기한다.
+          if grep -qE '^CONFIG_USE_APK=y' sdk/.config 2>/dev/null; then
+            PKG_MANAGER=apk
+            PKG_EXT=apk
+          else
+            PKG_MANAGER=opkg
+            PKG_EXT=ipk
+          fi
+          echo "감지된 패키지 매니저: ${PKG_MANAGER} (.${PKG_EXT})"
+          echo "PKG_MANAGER=${PKG_MANAGER}" >> "$GITHUB_ENV"
+          echo "PKG_EXT=${PKG_EXT}" >> "$GITHUB_ENV"
+
+          if [ "${PKG_MANAGER}" = "opkg" ]; then
+            cp sdk/scripts/ipkg-make-index.sh ./ipkg-make-index.sh
+            chmod +x ./ipkg-make-index.sh
+
+            cat > ./mkhash <<'MKHASH_EOF'
+          #!/bin/sh
+          algo="$1"; shift
+          case "$algo" in
+            sha256) sha256sum "$1" | cut -d' ' -f1 ;;
+            md5) md5sum "$1" | cut -d' ' -f1 ;;
+            *) echo "mkhash: unsupported algo $algo" >&2; exit 1 ;;
+          esac
+          MKHASH_EOF
+            chmod +x ./mkhash
+            echo "MKHASH=$(pwd)/mkhash" >> "$GITHUB_ENV"
+          else
+            # apk 기반 SDK는 자체 호스트용 apk 바이너리(staging_dir/host/bin/apk)를 포함하고 있어
+            # 별도 ipkg-make-index.sh/mkhash 준비가 필요 없다. 커스텀 로컬 피드 인덱스(packages.adb)는
+            # apk mkndx로 ImageBuilder 단계에서 직접 생성한다.
+            echo "apk 기반 SDK - ipkg-make-index.sh/mkhash 준비 생략"
+          fi
+
+      - name: luci-theme-alpha 소스 가져오기 + brand.png 교체
+        run: |
+          set -euo pipefail
+          rm -rf "sdk/package/${THEME_PKG}"
+          git clone --depth 1 "${THEME_REPO}" "sdk/package/${THEME_PKG}"
+
+          PROFILE_BRAND_URL="${BRAND_BASE_URL}/${PROFILE}.png"
+          DEFAULT_BRAND_URL="${BRAND_BASE_URL}/brand.png"
+
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${PROFILE_BRAND_URL}")
+          if [ "${HTTP_CODE}" = "200" ]; then
+            BRAND_URL="${PROFILE_BRAND_URL}"
+            echo "프로필 전용 브랜드 이미지 사용: ${BRAND_URL}"
+          else
+            BRAND_URL="${DEFAULT_BRAND_URL}"
+            echo "프로필 전용 브랜드 이미지(${PROFILE_BRAND_URL})를 찾지 못해(HTTP ${HTTP_CODE}) 기본값 사용: ${BRAND_URL}"
+          fi
+
+          curl -L --retry 3 --fail "${BRAND_URL}" -o /tmp/brand.png
+
+          cp -f /tmp/brand.png "sdk/package/${THEME_PKG}/luasrc/brand.png" || true
+          cp -f /tmp/brand.png "sdk/package/${THEME_PKG}/luasrc/style/brand.png" || true
+          find "sdk/package/${THEME_PKG}" -type f -iname "brand.png" -exec cp -f /tmp/brand.png {} \;
+
+      - name: luci-app-alpha-config 소스 가져오기 (테마 필수 의존 패키지)
+        run: |
+          set -euo pipefail
+          rm -rf "sdk/package/${THEME_CONFIG_PKG}"
+          git clone --depth 1 "${THEME_CONFIG_REPO}" "sdk/package/${THEME_CONFIG_PKG}"
+
+      - name: clashoo 소스 가져오기
+        run: |
+          set -euo pipefail
+          # nikki는 별도 opkg 피드를 썼지만, clashoo는 공식 README 방식대로
+          # 저장소를 통째로 package/ 아래에 클론해 SDK에서 직접 코어+LuCI를 컴파일한다.
+          rm -rf "sdk/package/${CLASHOO_CLONE_DIR}"
+          git clone --depth 1 "${CLASHOO_REPO}" "sdk/package/${CLASHOO_CLONE_DIR}"
+          ls -la "sdk/package/${CLASHOO_CLONE_DIR}"
+
+      - name: clashoo 한국어(ko) po 파일 추가
+        run: |
+          set -euo pipefail
+          # luci-app-clashoo/po/<lang>/<pkgname>.po 규칙에 맞춰 배치하면
+          # feeds/luci 빌드 시스템이 luci-i18n-clashoo-zh-cn과 동일한 방식으로
+          # luci-i18n-clashoo-ko 패키지를 자동 생성한다.
+          LUCI_APP_DIR=$(find "sdk/package/${CLASHOO_CLONE_DIR}" -maxdepth 1 -type d -iname "luci-app-clashoo" | head -n1)
+          if [ -z "${LUCI_APP_DIR:-}" ]; then
+            echo "::error::luci-app-clashoo 디렉터리를 찾지 못했습니다. clashoo 저장소 구조가 변경되었을 수 있습니다."
+            exit 1
+          fi
+
+          PO_DIR="${LUCI_APP_DIR}/po/ko"
+          mkdir -p "${PO_DIR}"
+          curl -L --retry 3 --fail -o "${PO_DIR}/clashoo.po" "${CLASHOO_PO_URL}"
+          echo "한국어 po 파일 배치 완료: ${PO_DIR}/clashoo.po"
+          head -n 10 "${PO_DIR}/clashoo.po"
+
+      - name: clashoo GeoIP/대시보드 경로 자동 탐지
+        id: clashoo_paths
+        run: |
+          set -euo pipefail
+          SRC="sdk/package/${CLASHOO_CLONE_DIR}"
+
+          # --- Country.mmdb가 설치되어야 하는 디렉터리 탐지 ---
+          # 소스 내에서 "Country.mmdb" 문자열을 참조하는 절대경로를 찾아 디렉터리만 추출한다.
+          MMDB_PATH=$(grep -rhoE "(/[A-Za-z0-9_./-]+/)Country\.mmdb" "$SRC" 2>/dev/null | sed -E 's#/Country\.mmdb$##' | sort -u | head -n1 || true)
+          if [ -n "${MMDB_PATH:-}" ]; then
+            echo "탐지된 Country.mmdb 설치 경로: ${MMDB_PATH}"
+          else
+            MMDB_PATH="${FALLBACK_MMDB_DIR}"
+            echo "::warning::Country.mmdb 참조 경로를 소스에서 찾지 못해 대체값 사용: ${MMDB_PATH} (실제 clashoo 구조와 다를 수 있으니 빌드 로그/실기기에서 반드시 확인 필요)"
+          fi
+
+          # --- 4종 대시보드(MetaCubeXD/YACD/Zashboard/Razord) 저장 디렉터리 규칙 탐지 ---
+          # zashboard가 설치되는 디렉터리 패턴을 찾고, 없으면 metacubexd/yacd/razord 중 하나의
+          # 패턴에서 이름만 zashboard로 치환해 유추한다.
+          DASH_PATH=$(grep -rhoE "(/[A-Za-z0-9_./-]+/)[Zz]ashboard(/|\")" "$SRC" 2>/dev/null | sed -E 's#[/"]$##' | sort -u | head -n1 || true)
+          if [ -z "${DASH_PATH:-}" ]; then
+            OTHER_PANEL_PATH=$(grep -rhoiE "(/[A-Za-z0-9_./-]+/)(metacubexd|yacd|razord)(/|\")" "$SRC" 2>/dev/null | sed -E 's#[/"]$##' | sort -u | head -n1 || true)
+            if [ -n "${OTHER_PANEL_PATH:-}" ]; then
+              DASH_PATH=$(echo "${OTHER_PANEL_PATH}" | sed -E 's#(metacubexd|yacd|razord)$#zashboard#i')
+              echo "다른 패널 경로 패턴에서 유추한 zashboard 경로: ${DASH_PATH}"
+            fi
+          else
+            echo "탐지된 zashboard 경로: ${DASH_PATH}"
+          fi
+          if [ -z "${DASH_PATH:-}" ]; then
+            DASH_PATH="${FALLBACK_DASHBOARD_DIR}"
+            echo "::warning::대시보드 설치 경로를 소스에서 찾지 못해 대체값 사용: ${DASH_PATH} (실제 clashoo 구조와 다를 수 있으니 빌드 로그/실기기에서 반드시 확인 필요)"
+          fi
+
+          # --- 기본 UCI 설정 파일에서 대시보드 선택 옵션명 탐지 (있다면) ---
+          UCI_DEFAULT_FILE=$(find "$SRC" -type f -path "*etc/config/clashoo" | head -n1 || true)
+          DASH_OPTION=""
+          if [ -n "${UCI_DEFAULT_FILE:-}" ]; then
+            echo "clashoo 기본 UCI 설정 파일 발견: ${UCI_DEFAULT_FILE}"
+            cp -f "${UCI_DEFAULT_FILE}" ./clashoo-default-uci.txt
+            DASH_OPTION=$(grep -iE "option[[:space:]]+'?(dashboard|panel|ui)[a-z_]*'?" "${UCI_DEFAULT_FILE}" | head -n1 | awk '{print $2}' | tr -d "'" || true)
+          fi
+          if [ -z "${DASH_OPTION:-}" ]; then
+            DASH_OPTION="dashboard"
+            echo "::warning::UCI 대시보드 선택 옵션명을 자동 탐지하지 못해 기본값 'dashboard' 사용. uci-defaults 단계 결과를 실기기에서 검증 필요."
+          fi
+
+          echo "mmdb_dir=${MMDB_PATH}" >> "$GITHUB_OUTPUT"
+          echo "dashboard_dir=${DASH_PATH}" >> "$GITHUB_OUTPUT"
+          echo "dashboard_option=${DASH_OPTION}" >> "$GITHUB_OUTPUT"
+
+      - name: SDK feeds 업데이트/설치 및 테마+clashoo 패키지 컴파일
+        run: |
+          set -euo pipefail
+          cd sdk
+          ./scripts/feeds update -a 2>&1 | tee ../feeds-update.log
+          ./scripts/feeds install -a 2>&1 | tee ../feeds-install.log
+          ./scripts/feeds list -s > ../feeds-list.log || true
+
+          echo "CONFIG_CCACHE=y" >> .config
+          make defconfig
+          make "package/${THEME_PKG}/compile" -j"$(nproc)" V=s 2>&1 | tee ../sdk-build-theme.log
+          make "package/${THEME_CONFIG_PKG}/compile" -j"$(nproc)" V=s 2>&1 | tee ../sdk-build-theme-config.log
+          make "package/${CLASHOO_CORE_PKG}/compile" -j"$(nproc)" V=s 2>&1 | tee ../sdk-build-clashoo-core.log
+          make "package/${CLASHOO_LUCI_PKG}/compile" -j"$(nproc)" V=s 2>&1 | tee ../sdk-build-clashoo-luci.log
+
+          echo "── ccache 통계 ──"
+          ccache -s || true
+
+      - name: 컴파일된 커스텀 ipk 수집
+        id: theme_ipk
+        run: |
+          set -euo pipefail
+          mkdir -p custom-packages
+          find sdk/bin/packages \
+            \( -iname "${THEME_PKG}*.ipk" -o -iname "${THEME_CONFIG_PKG}*.ipk" \
+               -o -iname "${CLASHOO_CORE_PKG}*.ipk" -o -iname "${CLASHOO_LUCI_PKG}*.ipk" \
+               -o -iname "${CLASHOO_I18N_KO_PKG}*.ipk" \) \
+            -exec cp -f {} custom-packages/ \;
+          ls -la custom-packages/
+
+      # ---------------------------------------------------------------
+      # 3) ImageBuilder 단계
+      # ---------------------------------------------------------------
+      - name: ImageBuilder 다운로드 및 압축 해제
+        run: |
+          set -euo pipefail
+          [ -f imagebuilder.tar.zst ] || curl -fsSL -o imagebuilder.tar.zst "${{ steps.resolve.outputs.ib_url }}"
+          mkdir -p imagebuilder
+          tar --use-compress-program=unzstd -xf imagebuilder.tar.zst -C imagebuilder --strip-components=1
+
+      - name: 로컬 커스텀 피드 등록
+        id: repo
+        run: |
+          set -euo pipefail
+          cd imagebuilder
+
+          ARCH_PACKAGES=$(grep -oP '(?<=CONFIG_TARGET_ARCH_PACKAGES=")[^"]+' .config)
+          echo "arch_packages=${ARCH_PACKAGES}" >> "$GITHUB_OUTPUT"
+          echo "판별된 아키텍처: ${ARCH_PACKAGES}"
+
+          mkdir -p custom-packages
+          cp -f ../custom-packages/*.ipk custom-packages/ 2>/dev/null || true
+
+          (cd custom-packages && ../../ipkg-make-index.sh . > Packages && gzip -9nk -f Packages)
+
+          # 서명 확인 비활성화: 로컬 커스텀 피드를 그대로 쓰기 위한 트레이드오프.
+          sed -i '/option check_signature/d' repositories.conf
+
+          {
+            echo "src/gz custom file://$(pwd)/custom-packages"
+          } | cat - repositories.conf > repositories.conf.new
+          mv repositories.conf.new repositories.conf
+
+          cat repositories.conf
+
+      - name: 한국어 대시보드(zashboard-ko) 다운로드 및 이미지에 내장
+        run: |
+          set -euo pipefail
+          UI_DIR="imagebuilder/files${{ steps.clashoo_paths.outputs.dashboard_dir }}"
+          echo "대시보드 설치 대상 경로: ${UI_DIR}"
+          mkdir -p "${UI_DIR}"
+
+          curl -L --retry 3 --fail -o /tmp/dashboard-ko.zip "${DASHBOARD_KO_URL}"
+          rm -rf /tmp/dashboard-ko-extract
+          mkdir -p /tmp/dashboard-ko-extract
+          unzip -q -o /tmp/dashboard-ko.zip -d /tmp/dashboard-ko-extract
+
+          # 압축 최상위가 폴더 하나뿐이면 그 안의 내용물을 사용
+          TOP_ENTRIES=$(find /tmp/dashboard-ko-extract -mindepth 1 -maxdepth 1)
+          TOP_COUNT=$(echo "${TOP_ENTRIES}" | wc -l)
+          if [ "${TOP_COUNT}" -eq 1 ] && [ -d "${TOP_ENTRIES}" ]; then
+            cp -a "${TOP_ENTRIES}/." "${UI_DIR}/"
+          else
+            cp -a /tmp/dashboard-ko-extract/. "${UI_DIR}/"
+          fi
+          ls -la "${UI_DIR}"
+
+      - name: Country.mmdb 기본 내장
+        run: |
+          set -euo pipefail
+          MMDB_DIR="imagebuilder/files${{ steps.clashoo_paths.outputs.mmdb_dir }}"
+          echo "Country.mmdb 설치 대상 경로: ${MMDB_DIR}"
+          mkdir -p "${MMDB_DIR}"
+          curl -L --retry 3 --fail -o "${MMDB_DIR}/Country.mmdb" "${COUNTRY_MMDB_URL}"
+          ls -la "${MMDB_DIR}/Country.mmdb"
+
+      - name: 부팅시 기본값(uci-defaults) 생성
+        run: |
+          set -euo pipefail
+          mkdir -p imagebuilder/files/etc/uci-defaults
+          DASH_OPTION="${{ steps.clashoo_paths.outputs.dashboard_option }}"
+          cat > imagebuilder/files/etc/uci-defaults/99-custom-defaults <<EOF
+          #!/bin/sh
+          uci set system.@system[0].hostname='${DEVICE_HOSTNAME}'
+          uci set system.@system[0].zonename='${DEVICE_TZ}'
+          uci set luci.main.lang='${LUCI_LANG}'
+          uci set luci.main.mediaurlbase='/luci-static/alpha'
+          uci commit system
+          uci commit luci
+
+          # clashoo 대시보드 기본값: 한국어 Zashboard
+          # 옵션명(${DASH_OPTION})은 clashoo 소스에서 자동 탐지를 시도한 값이며,
+          # 탐지 실패 시 기본값 'dashboard'를 사용한다. 실제 옵션명이 다르면
+          # /etc/config/clashoo 를 참고해 이 스크립트를 수정해야 한다.
+          uci -q get clashoo.main > /dev/null || uci set clashoo.main=main
+          uci set clashoo.main.${DASH_OPTION}='zashboard'
+          uci set clashoo.main.${DASH_OPTION}_label='${DASHBOARD_KO_LABEL}'
+          uci commit clashoo
+
+          exit 0
+          EOF
+          chmod +x imagebuilder/files/etc/uci-defaults/99-custom-defaults
+
+      - name: 이미지 빌드
+        id: image_build
+        run: |
+          set -euo pipefail
+          cd imagebuilder
+          PACKAGES="${THEME_PKG} ${THEME_CONFIG_PKG} luci-i18n-base-${LUCI_LANG} luci-mod-dashboard luci-i18n-dashboard-${LUCI_LANG} ${CLASHOO_CORE_PKG} ${CLASHOO_LUCI_PKG} ${CLASHOO_I18N_KO_PKG} firewall4 nftables ip-full kmod-inet-diag kmod-nft-socket kmod-nft-tproxy kmod-tun kmod-dummy yq curl ca-bundle"
+          echo "${PACKAGES}" > ../packages-used.txt
+          make image \
+            PROFILE="${PROFILE}" \
+            PACKAGES="${PACKAGES}" \
+            FILES="files" \
+            -j"$(nproc)" V=s 2>&1 | tee ../image-build.log
+          ls -la bin/targets/*/*/
+
+      # ---------------------------------------------------------------
+      # 디버그 번들: config, feeds, repositories.conf, 빌드 로그, 버전정보,
+      # clashoo 경로 자동 탐지 결과 등을 모아 재현/디버깅에 활용
+      # ---------------------------------------------------------------
+      - name: 디버그 정보 번들 생성
+        run: |
+          set -euo pipefail
+          DBG=debug-info
+          mkdir -p "${DBG}/sdk" "${DBG}/imagebuilder"
+
+          cat > "${DBG}/resolve-info.txt" <<EOF
+          version=${{ steps.resolve.outputs.version }}
+          target=${TARGET}
+          subtarget=${SUBTARGET}
+          profile=${PROFILE}
+          branch=${BRANCH}
+          arch_packages=${{ steps.repo.outputs.arch_packages }}
+          download_base=${{ steps.resolve.outputs.download_base }}
+          ib_url=${{ steps.resolve.outputs.ib_url }}
+          sdk_url=${{ steps.resolve.outputs.sdk_url }}
+          hostname=${DEVICE_HOSTNAME}
+          timezone=${DEVICE_TZ}
+          luci_lang=${LUCI_LANG}
+          clashoo_mmdb_dir=${{ steps.clashoo_paths.outputs.mmdb_dir }}
+          clashoo_dashboard_dir=${{ steps.clashoo_paths.outputs.dashboard_dir }}
+          clashoo_dashboard_option=${{ steps.clashoo_paths.outputs.dashboard_option }}
+          EOF
+
+          cp -f sdk/.config "${DBG}/sdk/.config" 2>/dev/null || true
+          cp -f clashoo-default-uci.txt "${DBG}/sdk/" 2>/dev/null || true
+          cp -f feeds-update.log feeds-install.log feeds-list.log sdk-build-theme.log sdk-build-theme-config.log sdk-build-clashoo-core.log sdk-build-clashoo-luci.log "${DBG}/sdk/" 2>/dev/null || true
+
+          cp -f imagebuilder/.config "${DBG}/imagebuilder/.config" 2>/dev/null || true
+          cp -f imagebuilder/repositories.conf "${DBG}/imagebuilder/repositories.conf" 2>/dev/null || true
+          cp -rf imagebuilder/files "${DBG}/imagebuilder/files" 2>/dev/null || true
+          cp -f imagebuilder/custom-packages/Packages* "${DBG}/imagebuilder/" 2>/dev/null || true
+          cp -f packages-used.txt image-build.log "${DBG}/imagebuilder/" 2>/dev/null || true
+          find imagebuilder/bin/targets -maxdepth 3 \
+            \( -iname "*.manifest" -o -iname "*buildinfo*" -o -iname "profiles.json" -o -iname "sha256sums" \) \
+            -exec cp -f {} "${DBG}/imagebuilder/" \; 2>/dev/null || true
+
+          tar -czf debug-info.tar.gz "${DBG}"
+          ls -la debug-info.tar.gz
+
+      - name: 산출물 업로드 (아티팩트)
+        uses: actions/upload-artifact@v4
+        with:
+          name: openwrt-${{ steps.resolve.outputs.version }}-${{ env.TARGET }}-${{ env.SUBTARGET }}-${{ env.PROFILE }}
+          path: |
+            imagebuilder/bin/targets/**
+            debug-info.tar.gz
+
+      # ---------------------------------------------------------------
+      # 4) GitHub Release 자동 생성
+      # ---------------------------------------------------------------
+      - name: 릴리스 태그 생성
+        id: tag
+        run: |
+          echo "tag=${{ steps.resolve.outputs.version }}-${TARGET}-${SUBTARGET}-${PROFILE}-$(date +%Y%m%d%H%M)" >> "$GITHUB_OUTPUT"
+
+      - name: GitHub Release 생성
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: "OpenWrt ${{ steps.resolve.outputs.version }} - ${{ env.PROFILE }}"
+          body: |
+            - Base: OpenWrt ${{ steps.resolve.outputs.version }}
+            - Target/Subtarget: ${{ env.TARGET }}/${{ env.SUBTARGET }}
+            - Profile: ${{ env.PROFILE }}
+            - Hostname: ${{ env.DEVICE_HOSTNAME }} / Timezone: ${{ env.DEVICE_TZ }} / LuCI lang: ${{ env.LUCI_LANG }}
+            - Proxy app: clashoo (kenzok8/openwrt-clashoo), 기본 대시보드: Zashboard (한국어), Country.mmdb 기본 내장, LuCI 한국어(ko) 번역 포함
+            - debug-info.tar.gz 안에 .config / repositories.conf / feeds 로그 / 빌드 로그 / manifest·buildinfo / clashoo 경로 탐지 결과 포함 (디버그용)
+          files: |
+            imagebuilder/bin/targets/**/*
+            debug-info.tar.gz
