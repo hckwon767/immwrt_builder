@@ -525,7 +525,7 @@ jobs:
           # - kmod-nft-tproxy: nftables TPROXY 지원 (TPROXY 투명 프록시 모드 필수)
           # - kmod-tun: TUN 인터페이스 지원 (TUN 모드 투명 프록시 필수)
           # - kmod-dummy: dummy 가상 네트워크 인터페이스 모듈
-          PACKAGES="luci ${UNIWRT_PKG} luci-i18n-base-${LUCI_LANG} ${CLASHOO_PKG} ${CLASHOO_LUCI_PKG} ${CLASHOO_LUCI_I18N_KO_PKG} curl wget-ssl irqbalance ucode ca-bundle yq firewall4 ip-full kmod-inet-diag kmod-nft-socket kmod-nft-tproxy kmod-tun kmod-dummy"
+          PACKAGES="luci ${UNIWRT_PKG} luci-i18n-base-${LUCI_LANG} ${CLASHOO_PKG} ${CLASHOO_LUCI_PKG} ${CLASHOO_LUCI_I18N_KO_PKG} curl wget-ssl irqbalance luci-app-irqbalance luci-i18n-irqbalance-${LUCI_LANG} ucode ca-bundle yq firewall4 ip-full kmod-inet-diag kmod-nft-socket kmod-nft-tproxy kmod-tun kmod-dummy"
           echo "${PACKAGES}" > ../packages-used.txt
           make image \
             PROFILE="${PROFILE}" \
