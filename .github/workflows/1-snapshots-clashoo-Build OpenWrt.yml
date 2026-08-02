@@ -1,4 +1,4 @@
-name: 1-snapshots-clashoo-Build OpenWrt (SDK + ImageBuilder)
+name: snapshots+clashoo+Build OpenWrt (SDK + ImageBuilder)
 
 on:
   workflow_dispatch:
@@ -305,6 +305,7 @@ jobs:
           text = script_path.read_text()
 
           old_urls = 'URLS="https://github.com/Zephyruso/zashboard/releases/latest/download/dist.zip https://github.com/Zephyruso/zashboard/releases/latest/download/dist-cdn-fonts.zip"'
+          # 폴백 없이 커스텀 zip 하나만 사용 (zashboard-ko.zip 안에 폰트까지 포함되어 있다는 전제)
           new_urls = 'URLS="' + custom_url + '"'
 
           count = text.count(old_urls)
@@ -434,26 +435,55 @@ jobs:
           mkdir -p imagebuilder/files/etc/uci-defaults
           cat > imagebuilder/files/etc/uci-defaults/99-custom-defaults <<EOF
           #!/bin/sh
-          uci set system.@system[0].hostname='${DEVICE_HOSTNAME}'
-          uci set system.@system[0].zonename='${DEVICE_TZ}'
-          uci set luci.main.lang='${LUCI_LANG}'
-          uci set luci.main.mediaurlbase='/luci-static/uniwrt'
-          uci commit system
-          uci commit luci
+          # 이 스크립트는 실패해도 절대 중간에 멈추지 않는다: uci-defaults 러너는
+          # 스크립트가 exit 0으로 끝나야만 network/dnsmasq/firewall을 리로드하고
+          # /etc/uci-defaults/에서 제거한다. 한 구간이라도 에러로 죽으면 LAN IP가
+          # UCI에는 반영돼도 실제 서비스는 재시작되지 않은 채로 남을 수 있으므로,
+          # 각 구간을 서브셸+로그로 감싸고 마지막에 항상 서비스를 재시작한다.
+          LOG=/root/99-custom-defaults.log
+          echo "=== 99-custom-defaults \$(date) ===" > "\${LOG}"
 
-          # LAN IP
-          uci set network.lan.ipaddr='${LAN_IP}'
-          uci commit network
+          {
+            uci set system.@system[0].hostname='${DEVICE_HOSTNAME}'
+            uci set system.@system[0].zonename='${DEVICE_TZ}'
+            uci set luci.main.lang='${LUCI_LANG}'
+            uci set luci.main.mediaurlbase='/luci-static/uniwrt'
+            uci commit system
+            uci commit luci
+            echo "system/luci OK"
+          } >> "\${LOG}" 2>&1 || echo "system/luci FAILED" >> "\${LOG}"
 
-          # 무선(Wi-Fi) SSID/비밀번호: 기기에 라디오가 여러 개(2.4GHz/5GHz)여도
-          # 존재하는 모든 wifi-iface 섹션에 동일하게 적용하고 활성화한다.
-          for _iface in \$(uci show wireless | grep '=wifi-iface' | cut -d. -f2 | cut -d= -f1); do
-            uci set wireless.\${_iface}.ssid='${WIFI_SSID}'
-            uci set wireless.\${_iface}.encryption='psk2'
-            uci set wireless.\${_iface}.key='${WIFI_PASSWORD}'
-            uci set wireless.\${_iface}.disabled='0'
-          done
-          uci commit wireless
+          {
+            uci set network.lan.ipaddr='${LAN_IP}'
+            uci set network.lan.netmask='255.255.255.0'
+            uci commit network
+            echo "network OK"
+          } >> "\${LOG}" 2>&1 || echo "network FAILED" >> "\${LOG}"
+
+          {
+            # 무선(Wi-Fi) SSID/비밀번호: 기기에 라디오가 여러 개(2.4GHz/5GHz)여도
+            # 존재하는 모든 wifi-iface 섹션(익명 @wifi-iface[N] 포함)에 동일하게
+            # 적용하고 활성화한다. 익명 섹션 참조는 반드시 따옴표로 감싼다.
+            config_load wireless 2>/dev/null
+            uci show wireless | grep '=wifi-iface' | cut -d. -f2 | cut -d= -f1 | while read -r _iface; do
+              uci set "wireless.\${_iface}.ssid"='${WIFI_SSID}'
+              uci set "wireless.\${_iface}.encryption"='psk2'
+              uci set "wireless.\${_iface}.key"='${WIFI_PASSWORD}'
+              uci set "wireless.\${_iface}.disabled"='0'
+              echo "wifi-iface \${_iface} OK"
+            done
+            uci commit wireless
+          } >> "\${LOG}" 2>&1 || echo "wireless FAILED" >> "\${LOG}"
+
+          # 위 구간 중 무엇이 실패했든, LAN IP/DHCP가 실제로 살아나도록
+          # 서비스를 명시적으로 재시작한다 (uci-defaults 표준 리로드에만 기대지 않음).
+          {
+            /etc/init.d/network reload || /etc/init.d/network restart
+            sleep 2
+            /etc/init.d/dnsmasq restart
+            /etc/init.d/firewall restart 2>/dev/null || true
+            echo "service restart OK"
+          } >> "\${LOG}" 2>&1 || echo "service restart FAILED" >> "\${LOG}"
 
           exit 0
           EOF
