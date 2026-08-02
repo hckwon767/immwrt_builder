@@ -32,12 +32,6 @@ env:
   DEVICE_HOSTNAME: ${{ inputs.hostname }}
   DEVICE_TZ: "Asia/Shanghai"
   LUCI_LANG: "ko"
-  # openwrt 공식 luci-theme-material. 공식 opkg/apk 피드에 이미 포함되어 있으므로
-  # SDK에서 소스로 컴파일할 필요 없이 ImageBuilder PACKAGES 목록에 넣기만 하면 된다.
-  THEME_PKG: luci-theme-material
-  # 부팅 시 material 테마의 기본 로고(brand.png)를 이 URL의 이미지로 교체한다.
-  # ImageBuilder FILES 오버레이로 덮어쓰므로 테마 패키지를 직접 건드리지 않는다.
-  BRAND_URL: https://raw.githubusercontent.com/hckwon767/immwrt_builder/refs/heads/main/openwrtbrand.png
   # clashoo는 nikki와 달리 별도의 프리빌트 opkg/apk 피드가 없다.
   # 저장소 자체가 OpenWrt 피드 구조(clashoo/, luci-app-clashoo/)이므로
   # SDK feeds에 등록해 소스에서 직접 컴파일한다 (README의 "소스 컴파일" 방식).
@@ -50,6 +44,11 @@ env:
   CLASHOO_PO_URL: https://raw.githubusercontent.com/hckwon767/immwrt_builder/refs/heads/main/clashoo.po
   # zashboard 패널 다운로드 URL을 사용자 커스텀 빌드로 교체 (panel_download.sh 패치용)
   CLASHOO_DASHBOARD_KO_URL: https://github.com/hckwon767/dashboard-ko/releases/latest/download/zashboard-ko.zip
+  # UniWRT 테마 역시 공식 opkg/apk 피드에 없는 별도 저장소이므로 clashoo와 동일하게
+  # SDK feeds에 등록해 소스에서 직접 컴파일한다. 저장소 루트 바로 아래에
+  # luci-theme-uniwrt/ 패키지 디렉터리가 있는 구조.
+  UNIWRT_REPO: https://github.com/ox1d3x3/uniwrt-luci.git
+  UNIWRT_PKG: luci-theme-uniwrt
 
 jobs:
   build:
@@ -158,12 +157,11 @@ jobs:
           ccache -z
 
       # ---------------------------------------------------------------
-      # 2) SDK 단계: clashoo / luci-app-clashoo 컴파일
-      #    material 테마는 openwrt 공식 opkg/apk 피드에 이미 포함되어 있으므로
-      #    SDK에서 소스로 컴파일하지 않는다 (ImageBuilder PACKAGES에서 바로 설치).
-      #    nikki와 달리 clashoo는 별도의 프리빌트 opkg/apk 피드가 없으므로
-      #    clashoo(런타임, mihomo 내장)와 luci-app-clashoo(LuCI 프론트/백엔드)
-      #    모두 SDK에서 소스로 직접 컴파일한다.
+      # 2) SDK 단계: clashoo / luci-app-clashoo / luci-theme-uniwrt 컴파일
+      #    nikki 프리빌트 피드나 openwrt 공식 opkg/apk 피드에 있는 패키지와 달리,
+      #    clashoo(런타임, mihomo 내장) + luci-app-clashoo(LuCI 프론트/백엔드),
+      #    그리고 luci-theme-uniwrt(테마) 모두 별도 프리빌트 피드가 없으므로
+      #    SDK에서 소스로 직접 컴파일한다.
       #    ※ SDK는 다운로드한 시점의 .config에 따라 opkg/apk 중 하나로 이미
       #      고정되어 있으므로(24.10=opkg, 25.x=apk), 이 단계 자체는 두 경우
       #      모두 동일한 make 커맨드로 동작한다. 산출물 확장자만 .ipk/.apk로 달라진다.
@@ -195,16 +193,19 @@ jobs:
           chmod +x ./mkhash
           echo "MKHASH=$(pwd)/mkhash" >> "$GITHUB_ENV"
 
-      - name: clashoo 피드 등록
+      - name: clashoo / uniwrt 피드 등록
         run: |
           set -euo pipefail
           # openwrt-clashoo 저장소 자체가 clashoo/, luci-app-clashoo/ 를 담은
           # OpenWrt feed 구조이므로 feeds.conf.default에 등록하는 것만으로
           # feeds update/install 시 두 패키지가 함께 인식된다.
           echo "src-git clashoo ${CLASHOO_REPO}" >> sdk/feeds.conf.default
+          # uniwrt-luci 저장소도 루트 바로 아래에 luci-theme-uniwrt/ 패키지
+          # 디렉터리를 담은 OpenWrt feed 구조이므로 동일하게 등록한다.
+          echo "src-git uniwrt ${UNIWRT_REPO}" >> sdk/feeds.conf.default
           cat sdk/feeds.conf.default
 
-      - name: SDK feeds 업데이트/설치 및 clashoo 패키지 컴파일
+      - name: SDK feeds 업데이트/설치 및 clashoo/uniwrt 패키지 컴파일
         run: |
           set -euo pipefail
           cd sdk
@@ -311,11 +312,20 @@ jobs:
           echo "── 패치된 panel_download.sh (zashboard 관련 라인) ──"
           grep -n "zashboard-ko\|URLS=" "${PANEL_SCRIPT}"
 
+          # uniwrt 피드 디렉터리 존재 확인 (feeds 구조가 바뀌면 컴파일 단계에서
+          # 조용히 스킵되지 않고 여기서 바로 실패하도록 미리 점검)
+          UNIWRT_DIR="feeds/uniwrt/${UNIWRT_PKG}"
+          if [ ! -d "${UNIWRT_DIR}" ]; then
+            echo "::error::${UNIWRT_DIR} 를 찾지 못했습니다. uniwrt-luci feed 구조가 바뀌었을 수 있습니다."
+            exit 1
+          fi
+
           # ccache 활성화 (호스트에 ccache가 설치되어 있으면 SDK가 자동으로 감지해 사용한다)
           echo "CONFIG_CCACHE=y" >> .config
           make defconfig
           make "package/${CLASHOO_PKG}/compile" -j"$(nproc)" V=s 2>&1 | tee ../sdk-build-clashoo.log
           make "package/${CLASHOO_LUCI_PKG}/compile" -j"$(nproc)" V=s 2>&1 | tee ../sdk-build-clashoo-luci.log
+          make "package/${UNIWRT_PKG}/compile" -j"$(nproc)" V=s 2>&1 | tee ../sdk-build-uniwrt.log
 
           echo "── ccache 통계 ──"
           ccache -s || true
@@ -325,12 +335,11 @@ jobs:
         run: |
           set -euo pipefail
           # 24.10(opkg)에서는 .ipk, 25.x(apk)에서는 .apk로 산출물이 나오므로
-          # 두 확장자를 모두 찾는다. (material 테마는 공식 피드에서 바로 설치하므로
-          # 여기서는 clashoo 관련 패키지만 수집한다.)
+          # 두 확장자를 모두 찾는다.
           mkdir -p custom-packages
           find sdk/bin/packages \
-            \( -iname "${CLASHOO_PKG}*.ipk"    -o -iname "${CLASHOO_LUCI_PKG}*.ipk"    -o -iname "${CLASHOO_LUCI_I18N_KO_PKG}*.ipk" \
-               -o -iname "${CLASHOO_PKG}*.apk" -o -iname "${CLASHOO_LUCI_PKG}*.apk"    -o -iname "${CLASHOO_LUCI_I18N_KO_PKG}*.apk" \) \
+            \( -iname "${CLASHOO_PKG}*.ipk"    -o -iname "${CLASHOO_LUCI_PKG}*.ipk"    -o -iname "${CLASHOO_LUCI_I18N_KO_PKG}*.ipk" -o -iname "${UNIWRT_PKG}*.ipk" \
+               -o -iname "${CLASHOO_PKG}*.apk" -o -iname "${CLASHOO_LUCI_PKG}*.apk"    -o -iname "${CLASHOO_LUCI_I18N_KO_PKG}*.apk" -o -iname "${UNIWRT_PKG}*.apk" \) \
             -exec cp -f {} custom-packages/ \;
           ls -la custom-packages/
 
@@ -354,11 +363,8 @@ jobs:
           echo "arch_packages=${ARCH_PACKAGES}" >> "$GITHUB_OUTPUT"
           echo "판별된 아키텍처: ${ARCH_PACKAGES}"
 
-          # clashoo는 nikki와 달리 원격 프리빌트 피드가 없다(SDK에서 이미
-          # clashoo/luci-app-clashoo를 직접 컴파일했으므로). material 테마는
-          # ImageBuilder가 기본으로 참조하는 공식 opkg/apk 피드에 이미 포함되어
-          # 있으므로 별도 등록이 필요 없다. 따라서 여기서는 로컬 custom-packages
-          # 피드(clashoo 전용)만 등록하면 된다.
+          # clashoo와 uniwrt 테마 모두 원격 프리빌트 피드가 없으므로(SDK에서 이미
+          # 직접 컴파일했으므로) 여기서는 로컬 custom-packages 피드만 등록하면 된다.
           #
           # ImmortalWrt/OpenWrt는 25.12부터 패키지 매니저가 opkg에서 apk로 바뀌었다.
           # 로컬 커스텀 피드 등록 방식, 서명 검증 끄는 방법, 인덱스 파일 형식이
@@ -414,21 +420,12 @@ jobs:
           uci set system.@system[0].hostname='${DEVICE_HOSTNAME}'
           uci set system.@system[0].zonename='${DEVICE_TZ}'
           uci set luci.main.lang='${LUCI_LANG}'
-          uci set luci.main.mediaurlbase='/luci-static/material'
+          uci set luci.main.mediaurlbase='/luci-static/uniwrt'
           uci commit system
           uci commit luci
           exit 0
           EOF
           chmod +x imagebuilder/files/etc/uci-defaults/99-custom-defaults
-
-      - name: material 테마 브랜드 로고 교체
-        run: |
-          set -euo pipefail
-          # luci-theme-material은 opkg/apk 공식 피드에서 그대로 설치하므로
-          # 패키지 소스를 건드리는 대신 ImageBuilder FILES 오버레이로 로고 파일만
-          # 덮어쓴다 (설치된 /www/luci-static/material/brand.png 를 rootfs 오버레이가 대체).
-          mkdir -p imagebuilder/files/www/luci-static/material
-          curl -L --retry 3 --fail "${BRAND_URL}" -o imagebuilder/files/www/luci-static/material/brand.png
 
       - name: 이미지 빌드
         id: image_build
@@ -438,7 +435,7 @@ jobs:
           # mediatek/filogic ImageBuilder의 기본 패키지 목록에는 dropbear(SSH)만 있고
           # luci/uhttpd는 포함되어 있지 않다. luci 코어 메타패키지를 명시적으로 추가하지
           # 않으면 SSH는 되는데 LuCI 웹은 아예 설치가 안 되는 상태로 이미지가 만들어진다.
-          PACKAGES="luci ${THEME_PKG} luci-i18n-base-${LUCI_LANG} luci-mod-dashboard luci-i18n-dashboard-${LUCI_LANG} ${CLASHOO_PKG} ${CLASHOO_LUCI_PKG} ${CLASHOO_LUCI_I18N_KO_PKG}"
+          PACKAGES="luci ${UNIWRT_PKG} luci-i18n-base-${LUCI_LANG} ${CLASHOO_PKG} ${CLASHOO_LUCI_PKG} ${CLASHOO_LUCI_I18N_KO_PKG}"
           echo "${PACKAGES}" > ../packages-used.txt
           make image \
             PROFILE="${PROFILE}" \
@@ -453,7 +450,7 @@ jobs:
           # ImageBuilder는 커널 소스가 없어 initramfs 이미지를 직접 만들 수 없으므로,
           # openwrt.org snapshots에 이미 빌드되어 있는 공식 initramfs 이미지를 그대로 받아
           # 아티팩트/릴리스에 함께 포함시킨다.
-          # ⚠ 이 이미지에는 material 테마, clashoo 등 커스텀 패키지가 들어있지 않다.
+          # ⚠ 이 이미지에는 uniwrt 테마, clashoo 등 커스텀 패키지가 들어있지 않다.
           #    TFTP 복구, 최초 설치(공유기가 아직 벽돌/순정 상태일 때) 용도로만 사용하고,
           #    설치 후에는 위에서 만든 squashfs-sysupgrade 이미지로 sysupgrade 하면 된다.
           mkdir -p stock-initramfs
@@ -487,6 +484,7 @@ jobs:
           profile=${PROFILE}
           source=snapshots
           clashoo_repo=${CLASHOO_REPO}
+          uniwrt_repo=${UNIWRT_REPO}
           arch_packages=${{ steps.repo.outputs.arch_packages }}
           pkg_manager=${{ steps.repo.outputs.pkg_manager }}
           download_base=${{ steps.resolve.outputs.download_base }}
@@ -500,7 +498,7 @@ jobs:
           # SDK 쪽 설정/피드 정보
           cp -f sdk/.config "${DBG}/sdk/.config" 2>/dev/null || true
           cp -f sdk/feeds.conf.default "${DBG}/sdk/feeds.conf.default" 2>/dev/null || true
-          cp -f feeds-update.log feeds-install.log feeds-list.log sdk-build-clashoo.log sdk-build-clashoo-luci.log "${DBG}/sdk/" 2>/dev/null || true
+          cp -f feeds-update.log feeds-install.log feeds-list.log sdk-build-clashoo.log sdk-build-clashoo-luci.log sdk-build-uniwrt.log "${DBG}/sdk/" 2>/dev/null || true
 
           # ImageBuilder 쪽 설정/피드/빌드 정보 (opkg: repositories.conf / apk: repositories)
           cp -f imagebuilder/.config "${DBG}/imagebuilder/.config" 2>/dev/null || true
@@ -544,7 +542,7 @@ jobs:
             - Target/Subtarget: ${{ env.TARGET }}/${{ env.SUBTARGET }}
             - Profile: ${{ env.PROFILE }}
             - Package manager: ${{ steps.repo.outputs.pkg_manager }}
-            - Theme: luci-theme-material (official feed, custom brand.png via FILES overlay)
+            - Theme: luci-theme-uniwrt (https://github.com/ox1d3x3/uniwrt-luci, source compiled, set as default)
             - Proxy app: clashoo (mihomo + sing-box, source compiled)
             - Hostname: ${{ env.DEVICE_HOSTNAME }} / Timezone: ${{ env.DEVICE_TZ }} / LuCI lang: ${{ env.LUCI_LANG }}
             - stock-initramfs/ 안의 initramfs 이미지는 openwrt.org 공식 배포본 그대로이며 커스텀 패키지가 포함되어 있지 않음 (TFTP 복구·최초 설치 전용, 설치 후에는 sysupgrade 이미지로 업그레이드)
