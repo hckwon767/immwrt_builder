@@ -305,7 +305,7 @@ jobs:
           text = script_path.read_text()
 
           old_urls = 'URLS="https://github.com/Zephyruso/zashboard/releases/latest/download/dist.zip https://github.com/Zephyruso/zashboard/releases/latest/download/dist-cdn-fonts.zip"'
-          new_urls = 'URLS="' + custom_url + ' https://github.com/Zephyruso/zashboard/releases/latest/download/dist.zip"'
+          new_urls = 'URLS="' + custom_url + '"'
 
           count = text.count(old_urls)
           if count == 0:
