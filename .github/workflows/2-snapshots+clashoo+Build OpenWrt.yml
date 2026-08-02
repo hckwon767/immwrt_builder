@@ -1,0 +1,647 @@
+name: 1-snapshots+clashoo+Build OpenWrt (SDK + ImageBuilder)
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "타겟 (예: mediatek, sunxi)"
+        required: true
+        default: "mediatek"
+      subtarget:
+        description: "서브타겟 (예: filogic, cortexa53)"
+        required: true
+        default: "filogic"
+      profile:
+        description: "프로필 (예: asus_tuf-ax4200q, xunlong_orangepi-zero3)"
+        required: true
+        default: "cudy_tr3000-v1"
+      hostname:
+        description: "장치 호스트네임"
+        required: true
+        default: "VPNBOX"
+
+permissions:
+  contents: write
+
+env:
+  TARGET: ${{ inputs.target }}
+  SUBTARGET: ${{ inputs.subtarget }}
+  PROFILE: ${{ inputs.profile }}
+  # 항상 downloads.openwrt.org/snapshots(마스터 브랜치 스냅샷)에서 받아 빌드하므로
+  # 릴리스 버전 선택은 필요 없다.
+  DEVICE_HOSTNAME: ${{ inputs.hostname }}
+  DEVICE_TZ: "Asia/Shanghai"
+  LUCI_LANG: "ko"
+  # 기본 LAN IP / 무선 SSID·비밀번호 (부팅시 uci-defaults로 적용됨)
+  LAN_IP: "192.168.10.1"
+  WIFI_SSID: "jina"
+  WIFI_PASSWORD: "min080603"
+  # clashoo는 nikki와 달리 별도의 프리빌트 opkg/apk 피드가 없다.
+  # 저장소 자체가 OpenWrt 피드 구조(clashoo/, luci-app-clashoo/)이므로
+  # SDK feeds에 등록해 소스에서 직접 컴파일한다 (README의 "소스 컴파일" 방식).
+  CLASHOO_REPO: https://github.com/kenzok8/openwrt-clashoo.git
+  CLASHOO_PKG: clashoo
+  CLASHOO_LUCI_PKG: luci-app-clashoo
+  # luci-app-clashoo는 기본적으로 중국어(zh-cn) 위주라, 한국어 po 번역을
+  # feed 소스에 주입해서 luci-i18n-clashoo-ko 서브패키지를 함께 빌드한다.
+  CLASHOO_LUCI_I18N_KO_PKG: luci-i18n-clashoo-ko
+  CLASHOO_PO_URL: https://raw.githubusercontent.com/hckwon767/immwrt_builder/refs/heads/main/clashoo.po
+  # zashboard 패널 다운로드 URL을 사용자 커스텀 빌드로 교체 (panel_download.sh 패치용)
+  CLASHOO_DASHBOARD_KO_URL: https://github.com/hckwon767/dashboard-ko/releases/latest/download/zashboard-ko.zip
+  # clashoo(mihomo)가 참조하는 GeoIP 데이터베이스. 최초 부팅 시 인터넷에서
+  # 내려받지 않아도 되도록 이미지 빌드 시점에 미리 받아 /etc/clashoo/Country.mmdb 로 넣어둔다.
+  CLASHOO_MMDB_URL: https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/country.mmdb
+  # UniWRT 테마 역시 공식 opkg/apk 피드에 없는 별도 저장소이므로 clashoo와 동일하게
+  # SDK feeds에 등록해 소스에서 직접 컴파일한다. 저장소 루트 바로 아래에
+  # luci-theme-uniwrt/ 패키지 디렉터리가 있는 구조.
+  UNIWRT_REPO: https://github.com/ox1d3x3/uniwrt-luci.git
+  UNIWRT_PKG: luci-theme-uniwrt
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: 호스트 빌드 의존성 설치
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang flex bison g++ gawk \
+            gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev \
+            python3-setuptools rsync swig unzip zlib1g-dev file wget curl zstd ccache
+
+      # ---------------------------------------------------------------
+      # 1) snapshots에서 SDK/ImageBuilder 파일명 자동 탐색
+      #    (release 버전 개념이 없으므로 branch/version_pin 없이 항상
+      #    downloads.openwrt.org/snapshots/targets/... 를 그대로 사용)
+      # ---------------------------------------------------------------
+      - name: SDK/ImageBuilder 파일명 자동 탐색 (snapshots)
+        id: resolve
+        run: |
+          set -euo pipefail
+
+          DOWNLOAD_BASE="https://downloads.openwrt.org/snapshots/targets/${TARGET}/${SUBTARGET}"
+          PAGE=$(curl -fsSL "${DOWNLOAD_BASE}/")
+
+          IB_FILE=$(echo "${PAGE}" | grep -oE "openwrt-imagebuilder-[^\"]+\.tar\.zst" | head -n1)
+          SDK_FILE=$(echo "${PAGE}" | grep -oE "openwrt-sdk-[^\"]+\.tar\.zst" | head -n1)
+
+          if [ -z "${IB_FILE}" ] || [ -z "${SDK_FILE}" ]; then
+            echo "::error::${TARGET}/${SUBTARGET} 용 ImageBuilder/SDK 파일을 snapshots에서 찾지 못했습니다."
+            echo "${PAGE}"
+            exit 1
+          fi
+
+          # ImageBuilder는 커널 소스가 없어 initramfs 이미지를 스스로 만들지 못한다
+          # (include/image.mk의 initramfs-images 룰이 $(IB)가 설정된 경우 비활성화됨).
+          # 그래서 openwrt.org가 미리 빌드해 올려둔 이 프로필용 공식 initramfs
+          # 이미지 파일명을 같은 디렉터리 목록에서 찾아둔다 (복구/최초 설치용).
+          # 접미사(-ubootmod-, -stock- 등)가 기기마다 달라 "PROFILE-...initramfs..." 형태로 넓게 매칭한다.
+          INITRAMFS_FILES=$(echo "${PAGE}" | grep -oE "openwrt-${TARGET}-${SUBTARGET}-${PROFILE}-[^\"]*initramfs[^\"]*\.(bin|itb|elf)" | sort -u || true)
+
+          if [ -z "${INITRAMFS_FILES}" ]; then
+            echo "::warning::${PROFILE} 프로필용 공식 initramfs 이미지를 snapshots에서 찾지 못했습니다. 이 디바이스는 initramfs 이미지를 제공하지 않을 수 있습니다."
+          fi
+
+          # 캐시 키/아티팩트명/릴리스 태그에 쓸 라벨. snapshots는 버전 번호가 없으므로
+          # 빌드 날짜(UTC)로 대체한다. 같은 날 재실행 시 SDK/IB 다운로드 캐시가
+          # 재사용되도록 시각까지는 넣지 않는다.
+          VERSION="snapshot-$(date -u +%Y%m%d)"
+
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "download_base=${DOWNLOAD_BASE}" >> "$GITHUB_OUTPUT"
+          echo "ib_file=${IB_FILE}" >> "$GITHUB_OUTPUT"
+          echo "sdk_file=${SDK_FILE}" >> "$GITHUB_OUTPUT"
+          echo "ib_url=${DOWNLOAD_BASE}/${IB_FILE}" >> "$GITHUB_OUTPUT"
+          echo "sdk_url=${DOWNLOAD_BASE}/${SDK_FILE}" >> "$GITHUB_OUTPUT"
+          {
+            echo "initramfs_files<<INITRAMFS_EOF"
+            echo "${INITRAMFS_FILES}"
+            echo "INITRAMFS_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: 다운로드 캐시
+        uses: actions/cache@v4
+        with:
+          path: |
+            sdk.tar.zst
+            imagebuilder.tar.zst
+          key: openwrt-${{ steps.resolve.outputs.version }}-${{ env.TARGET }}-${{ env.SUBTARGET }}
+
+      # ccache: 동일/유사 소스 재컴파일 시 컴파일러 호출 결과를 재사용해 빌드 시간을 크게 줄인다.
+      # clashoo는 mihomo(Go/Rust 기반) 등 소스 컴파일 비중이 nikki보다 크므로
+      # ccache의 효과가 더 중요하다.
+      - name: ccache 캐시
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-${{ env.TARGET }}-${{ env.SUBTARGET }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-${{ env.TARGET }}-${{ env.SUBTARGET }}-
+
+      # 패키지 소스 아카이브(dl/) 캐시: feeds/패키지 컴파일 시 매번 새로 받는
+      # 업스트림 소스 tarball을 재사용한다 (clashoo가 받는 mihomo 소스 tarball 포함).
+      - name: 패키지 소스(dl) 캐시
+        uses: actions/cache@v4
+        with:
+          path: sdk/dl
+          key: dl-${{ env.TARGET }}-${{ env.SUBTARGET }}-${{ steps.resolve.outputs.version }}
+          restore-keys: |
+            dl-${{ env.TARGET }}-${{ env.SUBTARGET }}-
+
+      - name: ccache 환경 설정
+        run: |
+          mkdir -p ~/.ccache
+          echo "USE_CCACHE=1" >> "$GITHUB_ENV"
+          echo "CCACHE_DIR=$HOME/.ccache" >> "$GITHUB_ENV"
+          echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+          # 컴파일 커맨드가 매번 미묘하게 달라지는 상황(타임스탬프 등)에서도
+          # 캐시 적중률을 높이기 위한 완화 옵션
+          echo "CCACHE_COMPRESS=1" >> "$GITHUB_ENV"
+          echo "CCACHE_SLOPPINESS=file_macro,time_macros,include_file_mtime,include_file_ctime,pch_defines" >> "$GITHUB_ENV"
+          ccache -M 5G
+          ccache -z
+
+      # ---------------------------------------------------------------
+      # 2) SDK 단계: clashoo / luci-app-clashoo / luci-theme-uniwrt 컴파일
+      #    nikki 프리빌트 피드나 openwrt 공식 opkg/apk 피드에 있는 패키지와 달리,
+      #    clashoo(런타임, mihomo 내장) + luci-app-clashoo(LuCI 프론트/백엔드),
+      #    그리고 luci-theme-uniwrt(테마) 모두 별도 프리빌트 피드가 없으므로
+      #    SDK에서 소스로 직접 컴파일한다.
+      #    ※ SDK는 다운로드한 시점의 .config에 따라 opkg/apk 중 하나로 이미
+      #      고정되어 있으므로(24.10=opkg, 25.x=apk), 이 단계 자체는 두 경우
+      #      모두 동일한 make 커맨드로 동작한다. 산출물 확장자만 .ipk/.apk로 달라진다.
+      # ---------------------------------------------------------------
+      - name: SDK 다운로드 및 압축 해제
+        run: |
+          set -euo pipefail
+          [ -f sdk.tar.zst ] || curl -fsSL -o sdk.tar.zst "${{ steps.resolve.outputs.sdk_url }}"
+          mkdir -p sdk
+          tar --use-compress-program=unzstd -xf sdk.tar.zst -C sdk --strip-components=1
+          # ImageBuilder tarball에는 이 스크립트가 없으므로 SDK에서 미리 복사해둔다
+          # (opkg 인덱스 생성용. apk 빌드에서는 사용하지 않지만 SDK 소스 트리에는
+          #  패키지 매니저 종류와 무관하게 항상 존재하는 스크립트라 복사 자체는 안전하다)
+          cp sdk/scripts/ipkg-make-index.sh ./ipkg-make-index.sh
+          chmod +x ./ipkg-make-index.sh
+
+          # ipkg-make-index.sh는 원래 build system이 만들어주는 host/mkhash 툴을
+          # $MKHASH 환경변수로 넘겨 받아 "$MKHASH sha256 <file>" 형태로 호출한다.
+          # SDK 단독 실행 시엔 이 값이 없으므로 sha256sum을 감싼 래퍼로 대체한다.
+          cat > ./mkhash <<'MKHASH_EOF'
+          #!/bin/sh
+          algo="$1"; shift
+          case "$algo" in
+            sha256) sha256sum "$1" | cut -d' ' -f1 ;;
+            md5) md5sum "$1" | cut -d' ' -f1 ;;
+            *) echo "mkhash: unsupported algo $algo" >&2; exit 1 ;;
+          esac
+          MKHASH_EOF
+          chmod +x ./mkhash
+          echo "MKHASH=$(pwd)/mkhash" >> "$GITHUB_ENV"
+
+      - name: clashoo / uniwrt 피드 등록
+        run: |
+          set -euo pipefail
+          # openwrt-clashoo 저장소 자체가 clashoo/, luci-app-clashoo/ 를 담은
+          # OpenWrt feed 구조이므로 feeds.conf.default에 등록하는 것만으로
+          # feeds update/install 시 두 패키지가 함께 인식된다.
+          echo "src-git clashoo ${CLASHOO_REPO}" >> sdk/feeds.conf.default
+          # uniwrt-luci 저장소도 루트 바로 아래에 luci-theme-uniwrt/ 패키지
+          # 디렉터리를 담은 OpenWrt feed 구조이므로 동일하게 등록한다.
+          echo "src-git uniwrt ${UNIWRT_REPO}" >> sdk/feeds.conf.default
+          cat sdk/feeds.conf.default
+
+      - name: SDK feeds 업데이트/설치 및 clashoo/uniwrt 패키지 컴파일
+        run: |
+          set -euo pipefail
+          cd sdk
+          ./scripts/feeds update -a 2>&1 | tee ../feeds-update.log
+          ./scripts/feeds install -a 2>&1 | tee ../feeds-install.log
+          ./scripts/feeds list -s > ../feeds-list.log || true
+
+          # --- clashoo 한국어(ko) 번역 주입 ---
+          # clashoo의 luci-app-clashoo/Makefile은 표준 luci.mk 자동 i18n 스캔 방식이 아니라
+          # zh-cn 전용 패키지(Package/luci-i18n-clashoo-zh-cn)가 수동으로 하드코딩되어 있다.
+          # 따라서 po/ko/clashoo.po 파일만 추가해서는 luci-i18n-clashoo-ko 패키지가
+          # 생성되지 않는다. po 파일 추가 + Makefile에 ko용 패키지 정의(po2lmo 라인,
+          # Package/luci-i18n-clashoo-ko 블록, BuildPackage 등록)를 함께 패치해야 한다.
+          CLASHOO_LUCI_DIR="feeds/clashoo/${CLASHOO_LUCI_PKG}"
+          if [ ! -d "${CLASHOO_LUCI_DIR}" ]; then
+            echo "::error::${CLASHOO_LUCI_DIR} 를 찾지 못했습니다. feed 구조가 바뀌었을 수 있습니다."
+            exit 1
+          fi
+
+          CLASHOO_PO_DIR="${CLASHOO_LUCI_DIR}/po/ko"
+          mkdir -p "${CLASHOO_PO_DIR}"
+          curl -fsSL --retry 3 "${CLASHOO_PO_URL}" -o "${CLASHOO_PO_DIR}/clashoo.po"
+          echo "clashoo 한국어 po 적용됨: ${CLASHOO_PO_DIR}/clashoo.po ($(grep -c '^msgid ' "${CLASHOO_PO_DIR}/clashoo.po") 개 문자열)"
+
+          python3 - "${CLASHOO_LUCI_DIR}/Makefile" <<'PYEOF'
+          import sys, pathlib
+
+          mk_path = pathlib.Path(sys.argv[1])
+          text = mk_path.read_text()
+
+          zh_line = "\tpo2lmo ./po/zh-cn/clashoo.po $(PKG_BUILD_DIR)/clashoo.zh-cn.lmo\n"
+          ko_line = "\tpo2lmo ./po/ko/clashoo.po $(PKG_BUILD_DIR)/clashoo.ko.lmo\n"
+
+          if ko_line not in text:
+              if zh_line not in text:
+                  sys.exit("ERROR: zh-cn po2lmo 라인을 찾지 못했습니다. Makefile 형식이 바뀐 것 같습니다.")
+              text = text.replace(zh_line, zh_line + ko_line, 1)
+
+          if "Package/luci-i18n-clashoo-ko" not in text:
+              ko_block = '''
+          define Package/luci-i18n-clashoo-ko
+          \tSECTION:=luci
+          \tCATEGORY:=LuCI
+          \tTITLE:=luci-app-clashoo - Korean (ko)
+          \tDEPENDS:=+luci-app-clashoo
+          \tPKGARCH:=all
+          endef
+
+          define Package/luci-i18n-clashoo-ko/install
+          \t$(INSTALL_DIR) $(1)/usr/lib/lua/luci/i18n
+          \t$(INSTALL_DATA) $(PKG_BUILD_DIR)/clashoo.ko.lmo $(1)/usr/lib/lua/luci/i18n/clashoo.ko.lmo
+          endef
+
+          define Package/luci-i18n-clashoo-ko/postinst
+          #!/bin/sh
+          if [ -z "$${IPKG_INSTROOT}" ]; then
+          \trm -rf /tmp/luci*
+          fi
+          exit 0
+          endef
+
+          $(eval $(call BuildPackage,luci-i18n-clashoo-ko))
+          '''
+              text = text.rstrip("\n") + "\n" + ko_block
+
+          mk_path.write_text(text)
+          print("Makefile 패치 완료:", mk_path)
+          PYEOF
+
+          echo "── 패치된 Makefile (마지막 30줄) ──"
+          tail -n 30 "${CLASHOO_LUCI_DIR}/Makefile"
+
+          # --- clashoo 대시보드(zashboard) 다운로드 URL을 커스텀 빌드로 교체 ---
+          # 런타임에 라우터가 "패널 다운로드"를 실행할 때 참조하는 스크립트로,
+          # clashoo(런타임) 패키지의 files/ 오버레이에 포함되어 그대로 설치된다.
+          # zashboard 케이스와 기본값(*) 케이스 모두 같은 URLS 라인을 쓰므로 둘 다 치환한다.
+          # 원본 zashboard 릴리스는 폴백으로 남겨, 커스텀 빌드가 내려가 있어도 안전하게 동작하게 한다.
+          CLASHOO_DIR="feeds/clashoo/${CLASHOO_PKG}"
+          PANEL_SCRIPT="${CLASHOO_DIR}/files/usr/share/clashoo/update/panel_download.sh"
+          if [ ! -f "${PANEL_SCRIPT}" ]; then
+            echo "::error::${PANEL_SCRIPT} 를 찾지 못했습니다. clashoo 소스 구조가 바뀌었을 수 있습니다."
+            exit 1
+          fi
+
+          python3 - "${PANEL_SCRIPT}" "${CLASHOO_DASHBOARD_KO_URL}" <<'PYEOF'
+          import sys, pathlib
+
+          script_path = pathlib.Path(sys.argv[1])
+          custom_url = sys.argv[2]
+          text = script_path.read_text()
+
+          old_urls = 'URLS="https://github.com/Zephyruso/zashboard/releases/latest/download/dist.zip https://github.com/Zephyruso/zashboard/releases/latest/download/dist-cdn-fonts.zip"'
+          # 폴백 없이 커스텀 zip 하나만 사용 (zashboard-ko.zip 안에 폰트까지 포함되어 있다는 전제)
+          new_urls = 'URLS="' + custom_url + '"'
+
+          count = text.count(old_urls)
+          if count == 0:
+              sys.exit("ERROR: zashboard URLS 라인을 찾지 못했습니다. panel_download.sh 형식이 바뀐 것 같습니다.")
+
+          text = text.replace(old_urls, new_urls)
+          script_path.write_text(text)
+          print(f"panel_download.sh 패치 완료 ({count}곳 치환):", script_path)
+          PYEOF
+
+          echo "── 패치된 panel_download.sh (zashboard 관련 라인) ──"
+          grep -n "zashboard-ko\|URLS=" "${PANEL_SCRIPT}"
+
+          # uniwrt 피드 디렉터리 존재 확인 (feeds 구조가 바뀌면 컴파일 단계에서
+          # 조용히 스킵되지 않고 여기서 바로 실패하도록 미리 점검)
+          UNIWRT_DIR="feeds/uniwrt/${UNIWRT_PKG}"
+          if [ ! -d "${UNIWRT_DIR}" ]; then
+            echo "::error::${UNIWRT_DIR} 를 찾지 못했습니다. uniwrt-luci feed 구조가 바뀌었을 수 있습니다."
+            exit 1
+          fi
+
+          # ccache 활성화 (호스트에 ccache가 설치되어 있으면 SDK가 자동으로 감지해 사용한다)
+          echo "CONFIG_CCACHE=y" >> .config
+          make defconfig
+          make "package/${CLASHOO_PKG}/compile" -j"$(nproc)" V=s 2>&1 | tee ../sdk-build-clashoo.log
+          make "package/${CLASHOO_LUCI_PKG}/compile" -j"$(nproc)" V=s 2>&1 | tee ../sdk-build-clashoo-luci.log
+          make "package/${UNIWRT_PKG}/compile" -j"$(nproc)" V=s 2>&1 | tee ../sdk-build-uniwrt.log
+
+          echo "── ccache 통계 ──"
+          ccache -s || true
+
+      - name: 컴파일된 커스텀 ipk/apk 수집
+        id: theme_ipk
+        run: |
+          set -euo pipefail
+          # 24.10(opkg)에서는 .ipk, 25.x(apk)에서는 .apk로 산출물이 나오므로
+          # 두 확장자를 모두 찾는다.
+          mkdir -p custom-packages
+          find sdk/bin/packages \
+            \( -iname "${CLASHOO_PKG}*.ipk"    -o -iname "${CLASHOO_LUCI_PKG}*.ipk"    -o -iname "${CLASHOO_LUCI_I18N_KO_PKG}*.ipk" -o -iname "${UNIWRT_PKG}*.ipk" \
+               -o -iname "${CLASHOO_PKG}*.apk" -o -iname "${CLASHOO_LUCI_PKG}*.apk"    -o -iname "${CLASHOO_LUCI_I18N_KO_PKG}*.apk" -o -iname "${UNIWRT_PKG}*.apk" \) \
+            -exec cp -f {} custom-packages/ \;
+          ls -la custom-packages/
+
+      # ---------------------------------------------------------------
+      # 3) ImageBuilder 단계
+      # ---------------------------------------------------------------
+      - name: ImageBuilder 다운로드 및 압축 해제
+        run: |
+          set -euo pipefail
+          [ -f imagebuilder.tar.zst ] || curl -fsSL -o imagebuilder.tar.zst "${{ steps.resolve.outputs.ib_url }}"
+          mkdir -p imagebuilder
+          tar --use-compress-program=unzstd -xf imagebuilder.tar.zst -C imagebuilder --strip-components=1
+
+      - name: 아키텍처 판별 및 로컬 피드 등록
+        id: repo
+        run: |
+          set -euo pipefail
+          cd imagebuilder
+
+          ARCH_PACKAGES=$(grep -oP '(?<=CONFIG_TARGET_ARCH_PACKAGES=")[^"]+' .config)
+          echo "arch_packages=${ARCH_PACKAGES}" >> "$GITHUB_OUTPUT"
+          echo "판별된 아키텍처: ${ARCH_PACKAGES}"
+
+          # clashoo와 uniwrt 테마 모두 원격 프리빌트 피드가 없으므로(SDK에서 이미
+          # 직접 컴파일했으므로) 여기서는 로컬 custom-packages 피드만 등록하면 된다.
+          #
+          # ImmortalWrt/OpenWrt는 25.12부터 패키지 매니저가 opkg에서 apk로 바뀌었다.
+          # 로컬 커스텀 피드 등록 방식, 서명 검증 끄는 방법, 인덱스 파일 형식이
+          # opkg와 apk에서 완전히 다르므로 여기서 분기 처리한다.
+          # (판별은 브랜치 문자열이 아니라 ImageBuilder 자체의 .config를 기준으로 한다)
+          if grep -qs '^CONFIG_USE_APK=y' .config; then
+            echo "패키지 매니저: apk"
+            echo "pkg_manager=apk" >> "$GITHUB_OUTPUT"
+
+            # apk 방식은 packages/ 디렉터리에 .apk 파일만 넣어두면 된다.
+            # make image 실행 시 ImageBuilder의 Makefile이 `apk mkndx`로
+            # packages.adb 인덱스를 자동 생성한다.
+            mkdir -p packages
+            cp -f ../custom-packages/*.apk packages/ 2>/dev/null || true
+            echo "── 로컬 apk 패키지 목록 ──"
+            ls -la packages/ || true
+
+            # 서명 검증 비활성화: 로컬 커스텀 패키지는 공식 서명 키로 서명되어
+            # 있지 않으므로 apk가 --allow-untrusted 없이는 설치를 거부한다.
+            sed -i '/CONFIG_SIGNATURE_CHECK/d' .config
+            echo "# CONFIG_SIGNATURE_CHECK is not set" >> .config
+          else
+            echo "패키지 매니저: opkg"
+            echo "pkg_manager=opkg" >> "$GITHUB_OUTPUT"
+
+            mkdir -p custom-packages
+            cp -f ../custom-packages/*.ipk custom-packages/ 2>/dev/null || true
+
+            # 주의: ipkg-make-index.sh에 넘기는 인자가 그대로 Packages의 Filename: 필드에
+            # 기록된다. 여기서 "custom-packages"라는 상대경로를 넘기면 Filename이
+            # "custom-packages/foo.ipk"로 기록되고, repositories.conf의 저장소 기준 URL이
+            # 이미 ".../imagebuilder/custom-packages"이므로 opkg가 두 경로를 이어붙여
+            # ".../custom-packages/custom-packages/foo.ipk"라는 잘못된 이중 경로로
+            # 다운로드를 시도하게 된다. 디렉터리 안에서 "."을 인자로 넘겨 이를 방지한다.
+            (cd custom-packages && ../../ipkg-make-index.sh . > Packages && gzip -9nk -f Packages)
+
+            # 서명 확인 비활성화: 로컬 커스텀 피드를 쓰기 위한 트레이드오프.
+            sed -i '/option check_signature/d' repositories.conf
+
+            echo "src/gz custom file://$(pwd)/custom-packages" | cat - repositories.conf > repositories.conf.new
+            mv repositories.conf.new repositories.conf
+
+            echo "── repositories.conf ──"
+            cat repositories.conf
+          fi
+
+      - name: GeoIP(country.mmdb) 선탑재
+        run: |
+          set -euo pipefail
+          # clashoo(mihomo)가 기동 시 참조하는 GeoIP 데이터베이스를 이미지에
+          # 미리 넣어둬서, 최초 부팅 시 라우터가 인터넷에서 따로 받지 않아도 되게 한다.
+          mkdir -p imagebuilder/files/etc/clashoo
+          curl -fsSL --retry 3 "${CLASHOO_MMDB_URL}" -o imagebuilder/files/etc/clashoo/Country.mmdb
+          echo "── /etc/clashoo 선탑재 파일 ──"
+          ls -la imagebuilder/files/etc/clashoo/
+
+      - name: 부팅시 기본값(uci-defaults) 생성
+        run: |
+          set -euo pipefail
+          mkdir -p imagebuilder/files/etc/uci-defaults
+          cat > imagebuilder/files/etc/uci-defaults/99-custom-defaults <<EOF
+          #!/bin/sh
+          # 이 스크립트는 실패해도 절대 중간에 멈추지 않는다: uci-defaults 러너는
+          # 스크립트가 exit 0으로 끝나야만 network/dnsmasq/firewall을 리로드하고
+          # /etc/uci-defaults/에서 제거한다. 한 구간이라도 에러로 죽으면 LAN IP가
+          # UCI에는 반영돼도 실제 서비스는 재시작되지 않은 채로 남을 수 있으므로,
+          # 각 구간을 서브셸+로그로 감싸고 마지막에 항상 서비스를 재시작한다.
+          LOG=/root/99-custom-defaults.log
+          echo "=== 99-custom-defaults \$(date) ===" > "\${LOG}"
+
+          {
+            uci set system.@system[0].hostname='${DEVICE_HOSTNAME}'
+            uci set system.@system[0].zonename='${DEVICE_TZ}'
+            uci set luci.main.lang='${LUCI_LANG}'
+            uci set luci.main.mediaurlbase='/luci-static/uniwrt'
+            uci commit system
+            uci commit luci
+            echo "system/luci OK"
+          } >> "\${LOG}" 2>&1 || echo "system/luci FAILED" >> "\${LOG}"
+
+          {
+            uci set network.lan.ipaddr='${LAN_IP}'
+            uci set network.lan.netmask='255.255.255.0'
+            uci commit network
+            echo "network OK"
+          } >> "\${LOG}" 2>&1 || echo "network FAILED" >> "\${LOG}"
+
+          {
+            # 무선(Wi-Fi) SSID/비밀번호: 기기에 라디오가 여러 개(2.4GHz/5GHz)여도
+            # 존재하는 모든 wifi-iface 섹션(익명 @wifi-iface[N] 포함)에 동일하게
+            # 적용하고 활성화한다. 익명 섹션 참조는 반드시 따옴표로 감싼다.
+            config_load wireless 2>/dev/null
+            uci show wireless | grep '=wifi-iface' | cut -d. -f2 | cut -d= -f1 | while read -r _iface; do
+              uci set "wireless.\${_iface}.ssid"='${WIFI_SSID}'
+              uci set "wireless.\${_iface}.encryption"='psk2'
+              uci set "wireless.\${_iface}.key"='${WIFI_PASSWORD}'
+              uci set "wireless.\${_iface}.disabled"='0'
+              echo "wifi-iface \${_iface} OK"
+            done
+            uci commit wireless
+          } >> "\${LOG}" 2>&1 || echo "wireless FAILED" >> "\${LOG}"
+
+          {
+            # irqbalance는 opkg/apk로 설치는 되지만 기본적으로 init 스크립트가
+            # disabled 상태이므로 enable 해줘야 부팅 시 자동 기동된다.
+            /etc/init.d/irqbalance enable
+            echo "irqbalance enable OK"
+          } >> "\${LOG}" 2>&1 || echo "irqbalance enable FAILED" >> "\${LOG}"
+
+          # 위 구간 중 무엇이 실패했든, LAN IP/DHCP가 실제로 살아나도록
+          # 서비스를 명시적으로 재시작한다 (uci-defaults 표준 리로드에만 기대지 않음).
+          {
+            /etc/init.d/network reload || /etc/init.d/network restart
+            sleep 2
+            /etc/init.d/dnsmasq restart
+            /etc/init.d/firewall restart 2>/dev/null || true
+            /etc/init.d/irqbalance start 2>/dev/null || true
+            echo "service restart OK"
+          } >> "\${LOG}" 2>&1 || echo "service restart FAILED" >> "\${LOG}"
+
+          exit 0
+          EOF
+          chmod +x imagebuilder/files/etc/uci-defaults/99-custom-defaults
+
+      - name: 이미지 빌드
+        id: image_build
+        run: |
+          set -euo pipefail
+          cd imagebuilder
+          # mediatek/filogic ImageBuilder의 기본 패키지 목록에는 dropbear(SSH)만 있고
+          # luci/uhttpd는 포함되어 있지 않다. luci 코어 메타패키지를 명시적으로 추가하지
+          # 않으면 SSH는 되는데 LuCI 웹은 아예 설치가 안 되는 상태로 이미지가 만들어진다.
+          #
+          # curl / wget-ssl / irqbalance 추가:
+          # - curl: HTTPS 다운로드/디버깅용
+          # - wget-ssl: OpenWrt 공식 피드에서 wget-ssl과 wget-nossl은 서로 대체(conflict)
+          #   관계라 동시 설치가 불가능하다. curl로 HTTPS는 이미 커버되므로, 스크립트
+          #   호환성(하드코딩된 wget 커맨드) 목적으로 SSL 지원되는 wget-ssl만 넣는다.
+          # - irqbalance: 멀티코어 인터럽트 분산. 패키지 설치만으로는 자동 시작되지 않아
+          #   uci-defaults(99-custom-defaults)에서 enable/start 처리함.
+          #
+          # clashoo(kenzok8/openwrt-clashoo) README 의존성/런타임 요구사항 반영:
+          # - ucode: 설정 생성/규칙화 런타임 (luci-app-clashoo RPC 백엔드, clashoo mixin.uc 등에서 사용)
+          # - ca-bundle: HTTPS(curl 등) 인증서 검증용 CA 루트 번들
+          # - yq: UCI → YAML 병합/처리 도구 (clashoo 런타임 설정 생성 시 사용)
+          # - firewall4: nftables 기반 방화벽 (clashoo의 net/ nftables 규칙이 이를 전제로 함)
+          # - ip-full: busybox 경량 ip 대신 완전한 iproute2 (정책 라우팅 등에 필요)
+          # - kmod-inet-diag: 소켓/연결 상태 진단 커널 모듈
+          # - kmod-nft-socket: nftables 소켓 매칭 (TPROXY 투명 프록시 구현에 사용)
+          # - kmod-nft-tproxy: nftables TPROXY 지원 (TPROXY 투명 프록시 모드 필수)
+          # - kmod-tun: TUN 인터페이스 지원 (TUN 모드 투명 프록시 필수)
+          # - kmod-dummy: dummy 가상 네트워크 인터페이스 모듈
+          PACKAGES="luci ${UNIWRT_PKG} luci-i18n-base-${LUCI_LANG} ${CLASHOO_PKG} ${CLASHOO_LUCI_PKG} ${CLASHOO_LUCI_I18N_KO_PKG} curl wget-ssl irqbalance ucode ca-bundle yq firewall4 ip-full kmod-inet-diag kmod-nft-socket kmod-nft-tproxy kmod-tun kmod-dummy"
+          echo "${PACKAGES}" > ../packages-used.txt
+          make image \
+            PROFILE="${PROFILE}" \
+            PACKAGES="${PACKAGES}" \
+            FILES="files" \
+            -j"$(nproc)" V=s 2>&1 | tee ../image-build.log
+          ls -la bin/targets/*/*/
+
+      - name: 공식 initramfs 이미지 다운로드 (복구/최초 설치용)
+        run: |
+          set -euo pipefail
+          # ImageBuilder는 커널 소스가 없어 initramfs 이미지를 직접 만들 수 없으므로,
+          # openwrt.org snapshots에 이미 빌드되어 있는 공식 initramfs 이미지를 그대로 받아
+          # 아티팩트/릴리스에 함께 포함시킨다.
+          # ⚠ 이 이미지에는 uniwrt 테마, clashoo 등 커스텀 패키지가 들어있지 않다.
+          #    TFTP 복구, 최초 설치(공유기가 아직 벽돌/순정 상태일 때) 용도로만 사용하고,
+          #    설치 후에는 위에서 만든 squashfs-sysupgrade 이미지로 sysupgrade 하면 된다.
+          mkdir -p stock-initramfs
+          INITRAMFS_FILES="${{ steps.resolve.outputs.initramfs_files }}"
+          if [ -z "${INITRAMFS_FILES}" ]; then
+            echo "다운로드할 공식 initramfs 이미지가 없습니다 (이 디바이스는 미지원일 수 있음)."
+          else
+            while IFS= read -r fname; do
+              [ -z "${fname}" ] && continue
+              echo "다운로드: ${fname}"
+              curl -fsSL --retry 3 "${{ steps.resolve.outputs.download_base }}/${fname}" -o "stock-initramfs/${fname}"
+            done <<< "${INITRAMFS_FILES}"
+          fi
+          ls -la stock-initramfs/ || true
+
+      # ---------------------------------------------------------------
+      # 디버그 번들: config, feeds, repositories(.conf), 빌드 로그, 버전정보 등
+      # 나중에 "왜 이 빌드가 이렇게 나왔는지" 재현/디버깅하기 위한 전체 스냅샷
+      # ---------------------------------------------------------------
+      - name: 디버그 정보 번들 생성
+        run: |
+          set -euo pipefail
+          DBG=debug-info
+          mkdir -p "${DBG}/sdk" "${DBG}/imagebuilder"
+
+          # 버전/URL 해석 결과
+          cat > "${DBG}/resolve-info.txt" <<EOF
+          version=${{ steps.resolve.outputs.version }}
+          target=${TARGET}
+          subtarget=${SUBTARGET}
+          profile=${PROFILE}
+          source=snapshots
+          clashoo_repo=${CLASHOO_REPO}
+          uniwrt_repo=${UNIWRT_REPO}
+          arch_packages=${{ steps.repo.outputs.arch_packages }}
+          pkg_manager=${{ steps.repo.outputs.pkg_manager }}
+          download_base=${{ steps.resolve.outputs.download_base }}
+          ib_url=${{ steps.resolve.outputs.ib_url }}
+          sdk_url=${{ steps.resolve.outputs.sdk_url }}
+          hostname=${DEVICE_HOSTNAME}
+          timezone=${DEVICE_TZ}
+          luci_lang=${LUCI_LANG}
+          lan_ip=${LAN_IP}
+          wifi_ssid=${WIFI_SSID}
+          EOF
+
+          # SDK 쪽 설정/피드 정보
+          cp -f sdk/.config "${DBG}/sdk/.config" 2>/dev/null || true
+          cp -f sdk/feeds.conf.default "${DBG}/sdk/feeds.conf.default" 2>/dev/null || true
+          cp -f feeds-update.log feeds-install.log feeds-list.log sdk-build-clashoo.log sdk-build-clashoo-luci.log sdk-build-uniwrt.log "${DBG}/sdk/" 2>/dev/null || true
+
+          # ImageBuilder 쪽 설정/피드/빌드 정보 (opkg: repositories.conf / apk: repositories)
+          cp -f imagebuilder/.config "${DBG}/imagebuilder/.config" 2>/dev/null || true
+          cp -f imagebuilder/repositories.conf "${DBG}/imagebuilder/repositories.conf" 2>/dev/null || true
+          cp -f imagebuilder/repositories "${DBG}/imagebuilder/repositories" 2>/dev/null || true
+          cp -rf imagebuilder/files "${DBG}/imagebuilder/files" 2>/dev/null || true
+          cp -f imagebuilder/custom-packages/Packages* "${DBG}/imagebuilder/" 2>/dev/null || true
+          cp -f imagebuilder/packages/packages.adb "${DBG}/imagebuilder/" 2>/dev/null || true
+          cp -f packages-used.txt image-build.log "${DBG}/imagebuilder/" 2>/dev/null || true
+          find imagebuilder/bin/targets -maxdepth 3 \
+            \( -iname "*.manifest" -o -iname "*buildinfo*" -o -iname "profiles.json" -o -iname "sha256sums" \) \
+            -exec cp -f {} "${DBG}/imagebuilder/" \; 2>/dev/null || true
+
+          tar -czf debug-info.tar.gz "${DBG}"
+          ls -la debug-info.tar.gz
+
+      - name: 산출물 업로드 (아티팩트)
+        uses: actions/upload-artifact@v4
+        with:
+          name: openwrt-${{ steps.resolve.outputs.version }}-${{ env.TARGET }}-${{ env.SUBTARGET }}-${{ env.PROFILE }}
+          path: |
+            imagebuilder/bin/targets/**
+            stock-initramfs/**
+            debug-info.tar.gz
+
+      # ---------------------------------------------------------------
+      # 4) GitHub Release 자동 생성
+      # ---------------------------------------------------------------
+      - name: 릴리스 태그 생성
+        id: tag
+        run: |
+          echo "tag=${{ steps.resolve.outputs.version }}-${TARGET}-${SUBTARGET}-${PROFILE}-$(date +%Y%m%d%H%M)" >> "$GITHUB_OUTPUT"
+
+      - name: GitHub Release 생성
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: "OpenWrt ${{ steps.resolve.outputs.version }} - ${{ env.PROFILE }}"
+          body: |
+            - Base: OpenWrt ${{ steps.resolve.outputs.version }}
+            - Target/Subtarget: ${{ env.TARGET }}/${{ env.SUBTARGET }}
+            - Profile: ${{ env.PROFILE }}
+            - Package manager: ${{ steps.repo.outputs.pkg_manager }}
+            - Theme: luci-theme-uniwrt (https://github.com/ox1d3x3/uniwrt-luci, source compiled, set as default)
+            - Proxy app: clashoo (mihomo + sing-box, source compiled), GeoIP(Country.mmdb) preloaded at /etc/clashoo/
+            - Extra packages: curl, wget-ssl, irqbalance (auto-enabled/started via uci-defaults), ucode, ca-bundle, yq, firewall4, ip-full, kmod-inet-diag, kmod-nft-socket, kmod-nft-tproxy, kmod-tun, kmod-dummy
+            - Default LAN IP: ${{ env.LAN_IP }} / Wi-Fi SSID: ${{ env.WIFI_SSID }}
+            - Hostname: ${{ env.DEVICE_HOSTNAME }} / Timezone: ${{ env.DEVICE_TZ }} / LuCI lang: ${{ env.LUCI_LANG }}
+            - stock-initramfs/ 안의 initramfs 이미지는 openwrt.org 공식 배포본 그대로이며 커스텀 패키지가 포함되어 있지 않음 (TFTP 복구·최초 설치 전용, 설치 후에는 sysupgrade 이미지로 업그레이드)
+            - debug-info.tar.gz 안에 .config / repositories(.conf) / feeds 로그 / 빌드 로그 / manifest·buildinfo 포함 (디버그용)
+          files: |
+            imagebuilder/bin/targets/**/*
+            stock-initramfs/*
+            debug-info.tar.gz
