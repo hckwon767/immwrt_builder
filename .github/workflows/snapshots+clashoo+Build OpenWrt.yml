@@ -35,7 +35,7 @@ env:
   # openwrt 공식 luci-theme-material. 공식 opkg/apk 피드에 이미 포함되어 있으므로
   # SDK에서 소스로 컴파일할 필요 없이 ImageBuilder PACKAGES 목록에 넣기만 하면 된다.
   THEME_PKG: luci-theme-material
-  # 부팅 시 material 테마의 기본 로고(logo.png)를 이 URL의 이미지로 교체한다.
+  # 부팅 시 material 테마의 기본 로고(brand.png)를 이 URL의 이미지로 교체한다.
   # ImageBuilder FILES 오버레이로 덮어쓰므로 테마 패키지를 직접 건드리지 않는다.
   BRAND_URL: https://raw.githubusercontent.com/hckwon767/immwrt_builder/refs/heads/main/openwrtbrand.png
   # clashoo는 nikki와 달리 별도의 프리빌트 opkg/apk 피드가 없다.
@@ -87,6 +87,17 @@ jobs:
             exit 1
           fi
 
+          # ImageBuilder는 커널 소스가 없어 initramfs 이미지를 스스로 만들지 못한다
+          # (include/image.mk의 initramfs-images 룰이 $(IB)가 설정된 경우 비활성화됨).
+          # 그래서 openwrt.org가 미리 빌드해 올려둔 이 프로필용 공식 initramfs
+          # 이미지 파일명을 같은 디렉터리 목록에서 찾아둔다 (복구/최초 설치용).
+          # 접미사(-ubootmod-, -stock- 등)가 기기마다 달라 "PROFILE-...initramfs..." 형태로 넓게 매칭한다.
+          INITRAMFS_FILES=$(echo "${PAGE}" | grep -oE "openwrt-${TARGET}-${SUBTARGET}-${PROFILE}-[^\"]*initramfs[^\"]*\.(bin|itb|elf)" | sort -u || true)
+
+          if [ -z "${INITRAMFS_FILES}" ]; then
+            echo "::warning::${PROFILE} 프로필용 공식 initramfs 이미지를 snapshots에서 찾지 못했습니다. 이 디바이스는 initramfs 이미지를 제공하지 않을 수 있습니다."
+          fi
+
           # 캐시 키/아티팩트명/릴리스 태그에 쓸 라벨. snapshots는 버전 번호가 없으므로
           # 빌드 날짜(UTC)로 대체한다. 같은 날 재실행 시 SDK/IB 다운로드 캐시가
           # 재사용되도록 시각까지는 넣지 않는다.
@@ -98,6 +109,11 @@ jobs:
           echo "sdk_file=${SDK_FILE}" >> "$GITHUB_OUTPUT"
           echo "ib_url=${DOWNLOAD_BASE}/${IB_FILE}" >> "$GITHUB_OUTPUT"
           echo "sdk_url=${DOWNLOAD_BASE}/${SDK_FILE}" >> "$GITHUB_OUTPUT"
+          {
+            echo "initramfs_files<<INITRAMFS_EOF"
+            echo "${INITRAMFS_FILES}"
+            echo "INITRAMFS_EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: 다운로드 캐시
         uses: actions/cache@v4
@@ -410,7 +426,7 @@ jobs:
           set -euo pipefail
           # luci-theme-material은 opkg/apk 공식 피드에서 그대로 설치하므로
           # 패키지 소스를 건드리는 대신 ImageBuilder FILES 오버레이로 로고 파일만
-          # 덮어쓴다 (설치된 /www/luci-static/material/logo.png 를 rootfs 오버레이가 대체).
+          # 덮어쓴다 (설치된 /www/luci-static/material/brand.png 를 rootfs 오버레이가 대체).
           mkdir -p imagebuilder/files/www/luci-static/material
           curl -L --retry 3 --fail "${BRAND_URL}" -o imagebuilder/files/www/luci-static/material/brand.png
 
@@ -419,7 +435,10 @@ jobs:
         run: |
           set -euo pipefail
           cd imagebuilder
-          PACKAGES="${THEME_PKG} luci-i18n-base-${LUCI_LANG} luci-mod-dashboard luci-i18n-dashboard-${LUCI_LANG} ${CLASHOO_PKG} ${CLASHOO_LUCI_PKG} ${CLASHOO_LUCI_I18N_KO_PKG}"
+          # mediatek/filogic ImageBuilder의 기본 패키지 목록에는 dropbear(SSH)만 있고
+          # luci/uhttpd는 포함되어 있지 않다. luci 코어 메타패키지를 명시적으로 추가하지
+          # 않으면 SSH는 되는데 LuCI 웹은 아예 설치가 안 되는 상태로 이미지가 만들어진다.
+          PACKAGES="luci ${THEME_PKG} luci-i18n-base-${LUCI_LANG} luci-mod-dashboard luci-i18n-dashboard-${LUCI_LANG} ${CLASHOO_PKG} ${CLASHOO_LUCI_PKG} ${CLASHOO_LUCI_I18N_KO_PKG}"
           echo "${PACKAGES}" > ../packages-used.txt
           make image \
             PROFILE="${PROFILE}" \
@@ -427,6 +446,28 @@ jobs:
             FILES="files" \
             -j"$(nproc)" V=s 2>&1 | tee ../image-build.log
           ls -la bin/targets/*/*/
+
+      - name: 공식 initramfs 이미지 다운로드 (복구/최초 설치용)
+        run: |
+          set -euo pipefail
+          # ImageBuilder는 커널 소스가 없어 initramfs 이미지를 직접 만들 수 없으므로,
+          # openwrt.org snapshots에 이미 빌드되어 있는 공식 initramfs 이미지를 그대로 받아
+          # 아티팩트/릴리스에 함께 포함시킨다.
+          # ⚠ 이 이미지에는 material 테마, clashoo 등 커스텀 패키지가 들어있지 않다.
+          #    TFTP 복구, 최초 설치(공유기가 아직 벽돌/순정 상태일 때) 용도로만 사용하고,
+          #    설치 후에는 위에서 만든 squashfs-sysupgrade 이미지로 sysupgrade 하면 된다.
+          mkdir -p stock-initramfs
+          INITRAMFS_FILES="${{ steps.resolve.outputs.initramfs_files }}"
+          if [ -z "${INITRAMFS_FILES}" ]; then
+            echo "다운로드할 공식 initramfs 이미지가 없습니다 (이 디바이스는 미지원일 수 있음)."
+          else
+            while IFS= read -r fname; do
+              [ -z "${fname}" ] && continue
+              echo "다운로드: ${fname}"
+              curl -fsSL --retry 3 "${{ steps.resolve.outputs.download_base }}/${fname}" -o "stock-initramfs/${fname}"
+            done <<< "${INITRAMFS_FILES}"
+          fi
+          ls -la stock-initramfs/ || true
 
       # ---------------------------------------------------------------
       # 디버그 번들: config, feeds, repositories(.conf), 빌드 로그, 버전정보 등
@@ -482,6 +523,7 @@ jobs:
           name: openwrt-${{ steps.resolve.outputs.version }}-${{ env.TARGET }}-${{ env.SUBTARGET }}-${{ env.PROFILE }}
           path: |
             imagebuilder/bin/targets/**
+            stock-initramfs/**
             debug-info.tar.gz
 
       # ---------------------------------------------------------------
@@ -502,10 +544,12 @@ jobs:
             - Target/Subtarget: ${{ env.TARGET }}/${{ env.SUBTARGET }}
             - Profile: ${{ env.PROFILE }}
             - Package manager: ${{ steps.repo.outputs.pkg_manager }}
-            - Theme: luci-theme-material (official feed, custom logo.png via FILES overlay)
+            - Theme: luci-theme-material (official feed, custom brand.png via FILES overlay)
             - Proxy app: clashoo (mihomo + sing-box, source compiled)
             - Hostname: ${{ env.DEVICE_HOSTNAME }} / Timezone: ${{ env.DEVICE_TZ }} / LuCI lang: ${{ env.LUCI_LANG }}
+            - stock-initramfs/ 안의 initramfs 이미지는 openwrt.org 공식 배포본 그대로이며 커스텀 패키지가 포함되어 있지 않음 (TFTP 복구·최초 설치 전용, 설치 후에는 sysupgrade 이미지로 업그레이드)
             - debug-info.tar.gz 안에 .config / repositories(.conf) / feeds 로그 / 빌드 로그 / manifest·buildinfo 포함 (디버그용)
           files: |
             imagebuilder/bin/targets/**/*
+            stock-initramfs/*
             debug-info.tar.gz
