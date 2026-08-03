@@ -476,8 +476,16 @@ jobs:
           } >> "\${LOG}" 2>&1 || echo "wireless FAILED" >> "\${LOG}"
 
           {
-            # irqbalance는 opkg/apk로 설치는 되지만 기본적으로 init 스크립트가
-            # disabled 상태이므로 enable 해줘야 부팅 시 자동 기동된다.
+            # irqbalance는 opkg/apk로 설치는 되지만, 패키지 기본 conffile
+            # (/etc/config/irqbalance)의 named section 'irqbalance'에서
+            # option enabled 값을 별도로 확인해 데몬 기동 여부를 결정한다.
+            # 즉 init 스크립트를 enable(rc.d 링크)만 해서는 부족하고,
+            # UCI enabled='1'까지 같이 설정해줘야 부팅 시 자동으로 실제 기동된다.
+            if ! uci -q get irqbalance.irqbalance >/dev/null; then
+              uci -q set irqbalance.irqbalance='irqbalance'
+            fi
+            uci -q set irqbalance.irqbalance.enabled='1'
+            uci -q commit irqbalance
             /etc/init.d/irqbalance enable
             echo "irqbalance enable OK"
           } >> "\${LOG}" 2>&1 || echo "irqbalance enable FAILED" >> "\${LOG}"
