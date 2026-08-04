@@ -456,6 +456,7 @@ jobs:
           {
             uci set network.lan.ipaddr='${LAN_IP}'
             uci set network.lan.netmask='255.255.255.0'
+            uci set network.globals.packet_steering='1'
             uci commit network
             echo "network OK"
           } >> "\${LOG}" 2>&1 || echo "network FAILED" >> "\${LOG}"
