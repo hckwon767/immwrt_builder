@@ -491,18 +491,6 @@ jobs:
             echo "irqbalance enable OK"
           } >> "\${LOG}" 2>&1 || echo "irqbalance enable FAILED" >> "\${LOG}"
 
-          {
-            # miniupnpd(luci-app-upnp 백엔드)도 irqbalance와 동일하게 UCI enabled 값과
-            # init enable을 둘 다 해줘야 부팅 시 실제로 데몬이 뜬다.
-            if ! uci -q get upnpd.config >/dev/null; then
-              uci -q set upnpd.config='upnpd'
-            fi
-            uci -q set upnpd.config.enabled='1'
-            uci -q commit upnpd
-            /etc/init.d/miniupnpd enable
-            echo "upnpd enable OK"
-          } >> "${LOG}" 2>&1 || echo "upnpd enable FAILED" >> "${LOG}"
-
           # 위 구간 중 무엇이 실패했든, LAN IP/DHCP가 실제로 살아나도록
           # 서비스를 명시적으로 재시작한다 (uci-defaults 표준 리로드에만 기대지 않음).
           {
@@ -511,7 +499,6 @@ jobs:
             /etc/init.d/dnsmasq restart
             /etc/init.d/firewall restart 2>/dev/null || true
             /etc/init.d/irqbalance start 2>/dev/null || true
-            /etc/init.d/miniupnpd start 2>/dev/null || true
             echo "service restart OK"
           } >> "\${LOG}" 2>&1 || echo "service restart FAILED" >> "\${LOG}"
 
@@ -547,7 +534,7 @@ jobs:
           # - kmod-nft-tproxy: nftables TPROXY 지원 (TPROXY 투명 프록시 모드 필수)
           # - kmod-tun: TUN 인터페이스 지원 (TUN 모드 투명 프록시 필수)
           # - kmod-dummy: dummy 가상 네트워크 인터페이스 모듈
-          PACKAGES="luci ${UNIWRT_PKG} luci-i18n-base-${LUCI_LANG} ${CLASHOO_PKG} ${CLASHOO_LUCI_PKG} ${CLASHOO_LUCI_I18N_KO_PKG} curl wget-ssl irqbalance luci-app-irqbalance luci-i18n-irqbalance-${LUCI_LANG} ucode ca-bundle yq firewall4 ip-full kmod-inet-diag kmod-nft-socket kmod-nft-tproxy kmod-tun kmod-dummy luci-app-ttyd luci-app-upnp luci-i18n-upnp-ko"
+          PACKAGES="luci ${UNIWRT_PKG} luci-i18n-base-${LUCI_LANG} ${CLASHOO_PKG} ${CLASHOO_LUCI_PKG} ${CLASHOO_LUCI_I18N_KO_PKG} curl wget-ssl irqbalance luci-app-irqbalance luci-i18n-irqbalance-${LUCI_LANG} ucode ca-bundle yq firewall4 ip-full kmod-inet-diag kmod-nft-socket kmod-nft-tproxy kmod-tun kmod-dummy luci-app-ttyd"
           echo "${PACKAGES}" > ../packages-used.txt
           make image \
             PROFILE="${PROFILE}" \
