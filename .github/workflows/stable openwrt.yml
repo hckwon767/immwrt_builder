@@ -542,8 +542,6 @@ jobs:
           # 위 구간 중 무엇이 실패했든, LAN IP/DHCP가 실제로 살아나도록
           # 서비스를 명시적으로 재시작한다 (uci-defaults 표준 리로드에만 기대지 않음).
           {
-            /etc/init.d/network reload || /etc/init.d/network restart
-            sleep 2
             /etc/init.d/dnsmasq restart
             /etc/init.d/firewall restart 2>/dev/null || true
             /etc/init.d/irqbalance start 2>/dev/null || true
