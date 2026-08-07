@@ -14,7 +14,7 @@ on:
       profile:
         description: "프로필 (예: asus_tuf-ax4200q, xunlong_orangepi-zero3)"
         required: true
-        default: "cudy_tr3000-v1"
+        default: "cudy_tr3000-v1-ubootmod"
       version:
         description: "빌드할 OpenWrt 버전. 'snapshot' = master 최신 스냅샷 / 'X.Y'(예: 25.12) = 해당 stable 브랜치의 최신 패치버전 자동 사용 / 'X.Y.Z'(예: 24.10.3) = 특정 패치버전 고정"
         required: true
