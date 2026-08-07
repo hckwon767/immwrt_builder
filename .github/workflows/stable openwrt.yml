@@ -1,4 +1,4 @@
-name: 스테이블버전openwrt_clashoo (SDK + ImageBuilder)
+name: 2-snapshots+clashoo+Build OpenWrt (SDK + ImageBuilder)
 
 on:
   workflow_dispatch:
@@ -12,17 +12,13 @@ on:
         required: true
         default: "filogic"
       profile:
-        description: "프로필 (예: asus_tuf-ax4200q, cudy_tr3000-v1)"
+        description: "프로필 (예: asus_tuf-ax4200q, xunlong_orangepi-zero3)"
         required: true
-        default: "cudy_tr3000-v1-ubootmod"
-      branch:
-        description: "추적할 마이너 릴리스 브랜치 (예: 24.10) - 이 안에서 최신 패치버전을 자동 탐색"
+        default: "cudy_tr3000-v1"
+      version:
+        description: "빌드할 OpenWrt 버전. 'snapshot' = master 최신 스냅샷 / 'X.Y'(예: 25.12) = 해당 stable 브랜치의 최신 패치버전 자동 사용 / 'X.Y.Z'(예: 24.10.3) = 특정 패치버전 고정"
         required: true
-        default: "25.12"
-      version_pin:
-        description: "특정 버전 강제 고정 (예: 24.10.5). 비워두면 branch 내 최신 자동 선택"
-        required: false
-        default: ""
+        default: "snapshot"
       hostname:
         description: "장치 호스트네임"
         required: true
@@ -35,33 +31,36 @@ env:
   TARGET: ${{ inputs.target }}
   SUBTARGET: ${{ inputs.subtarget }}
   PROFILE: ${{ inputs.profile }}
-  BRANCH: ${{ inputs.branch }}
-  VERSION_PIN: ${{ inputs.version_pin }}
+  # snapshot(master 최신) 또는 stable release(X.Y / X.Y.Z)를 하나의 입력으로 받는다.
+  # 실제 base URL(snapshots vs releases) 해석은 아래 "버전 해석" 스텝에서 수행한다.
+  VERSION_INPUT: ${{ inputs.version }}
   DEVICE_HOSTNAME: ${{ inputs.hostname }}
   DEVICE_TZ: "Asia/Shanghai"
   LUCI_LANG: "ko"
-  THEME_REPO: https://github.com/derisamedia/luci-theme-alpha
-  THEME_PKG: luci-theme-alpha
-  THEME_CONFIG_REPO: https://github.com/animegasan/luci-app-alpha-config
-  THEME_CONFIG_PKG: luci-app-alpha-config
-  BRAND_BASE_URL: https://raw.githubusercontent.com/hckwon767/immwrt_builder/refs/heads/main
+  # 기본 LAN IP / 무선 SSID·비밀번호 (부팅시 uci-defaults로 적용됨)
+  LAN_IP: "192.168.10.1"
+  WIFI_SSID: "jina"
+  WIFI_PASSWORD: "min080603"
+  # clashoo는 nikki와 달리 별도의 프리빌트 opkg/apk 피드가 없다.
+  # 저장소 자체가 OpenWrt 피드 구조(clashoo/, luci-app-clashoo/)이므로
+  # SDK feeds에 등록해 소스에서 직접 컴파일한다 (README의 "소스 컴파일" 방식).
   CLASHOO_REPO: https://github.com/kenzok8/openwrt-clashoo.git
-  CLASHOO_CLONE_DIR: openwrt-clashoo
-  CLASHOO_CORE_PKG: clashoo
+  CLASHOO_PKG: clashoo
   CLASHOO_LUCI_PKG: luci-app-clashoo
-  # luci-app-clashoo 한국어 번역 (po/ko/clashoo.po 로 배치하면 LuCI 빌드 시스템이
-  # 자동으로 luci-i18n-clashoo-ko 패키지를 생성한다 - luci-i18n-clashoo-zh-cn과 동일한 방식)
+  # luci-app-clashoo는 기본적으로 중국어(zh-cn) 위주라, 한국어 po 번역을
+  # feed 소스에 주입해서 luci-i18n-clashoo-ko 서브패키지를 함께 빌드한다.
+  CLASHOO_LUCI_I18N_KO_PKG: luci-i18n-clashoo-ko
   CLASHOO_PO_URL: https://raw.githubusercontent.com/hckwon767/immwrt_builder/refs/heads/main/clashoo.po
-  CLASHOO_I18N_KO_PKG: luci-i18n-clashoo-ko
-  DASHBOARD_KO_URL: https://github.com/hckwon767/dashboard-ko/releases/latest/download/zashboard-ko.zip
-  DASHBOARD_KO_LABEL: "Zashboard (한국어)"
-  # clashoo가 요구하는 mihomo Country.mmdb 기본 소스 (MetaCubeX 공식 geoip 릴리스)
-  COUNTRY_MMDB_URL: https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/country.mmdb
-  # 아래 두 값은 clashoo 저장소 구조에서 실제 경로를 찾지 못했을 때 쓰는 대체(fallback) 값이다.
-  # (저장소 README 상 "files/usr/share/clashoo/" 아래에 update 스크립트가 있다는 것만 공개되어 있어,
-  #  Country.mmdb / 대시보드가 정확히 어느 하위 경로를 쓰는지는 빌드 시점에 소스를 직접 grep해서 탐지한다.)
-  FALLBACK_MMDB_DIR: /usr/share/clashoo
-  FALLBACK_DASHBOARD_DIR: /usr/share/clashoo/ui/zashboard
+  # zashboard 패널 다운로드 URL을 사용자 커스텀 빌드로 교체 (panel_download.sh 패치용)
+  CLASHOO_DASHBOARD_KO_URL: https://github.com/hckwon767/dashboard-ko/releases/latest/download/zashboard-ko.zip
+  # clashoo(mihomo)가 참조하는 GeoIP 데이터베이스. 최초 부팅 시 인터넷에서
+  # 내려받지 않아도 되도록 이미지 빌드 시점에 미리 받아 /etc/clashoo/Country.mmdb 로 넣어둔다.
+  CLASHOO_MMDB_URL: https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/country.mmdb
+  # UniWRT 테마 역시 공식 opkg/apk 피드에 없는 별도 저장소이므로 clashoo와 동일하게
+  # SDK feeds에 등록해 소스에서 직접 컴파일한다. 저장소 루트 바로 아래에
+  # luci-theme-uniwrt/ 패키지 디렉터리가 있는 구조.
+  UNIWRT_REPO: https://github.com/ox1d3x3/uniwrt-luci.git
+  UNIWRT_PKG: luci-theme-uniwrt
 
 jobs:
   build:
@@ -78,48 +77,96 @@ jobs:
             python3-setuptools rsync swig unzip zlib1g-dev file wget curl zstd ccache
 
       # ---------------------------------------------------------------
-      # 1) branch 내 최신 릴리스 버전 자동 탐색 (또는 version_pin 사용)
-      #    ※ ImmortalWrt -> OpenWrt 로 빌드 소스 변경
+      # 1) 버전 해석 + SDK/ImageBuilder 파일명 자동 탐색
+      #    - version 입력이 "snapshot"이면 기존과 동일하게
+      #      downloads.openwrt.org/snapshots/targets/... 를 사용한다.
+      #    - "X.Y"(브랜치만) 형식이면 downloads.openwrt.org/releases/ 목록에서
+      #      해당 브랜치의 -rc가 아닌 최신 패치버전(X.Y.N)을 찾아 자동으로 고정한다.
+      #    - "X.Y.Z"(패치버전까지) 형식이면 그 버전을 그대로 사용한다.
       # ---------------------------------------------------------------
-      - name: 최신 릴리스 버전 및 SDK/ImageBuilder 파일명 자동 탐색
+      - name: 버전 해석 및 SDK/ImageBuilder 파일명 자동 탐색
         id: resolve
         run: |
           set -euo pipefail
 
-          if [ -n "${VERSION_PIN}" ]; then
-            VERSION="${VERSION_PIN}"
-            echo "버전 강제 고정: ${VERSION}"
+          RAW_VERSION="${VERSION_INPUT}"
+
+          if [ "${RAW_VERSION}" = "snapshot" ]; then
+            IS_SNAPSHOT=true
+            DOWNLOAD_BASE="https://downloads.openwrt.org/snapshots/targets/${TARGET}/${SUBTARGET}"
+            # snapshots는 버전 번호가 없으므로 빌드 날짜(UTC)로 라벨을 대체한다.
+            # 같은 날 재실행 시 SDK/IB 다운로드 캐시가 재사용되도록 시각까지는 넣지 않는다.
+            VERSION="snapshot-$(date -u +%Y%m%d)"
           else
-            INDEX_HTML=$(curl -fsSL "https://downloads.openwrt.org/releases/")
-            VERSION=$(echo "${INDEX_HTML}" \
-              | grep -oE "href=\"${BRANCH}\.[0-9]+/\"" \
-              | sed -E 's/href="(.*)\/"/\1/' \
-              | sort -V | tail -n1)
-            if [ -z "${VERSION}" ]; then
-              echo "::error::${BRANCH} 브랜치에서 릴리스 버전을 찾지 못했습니다."
+            IS_SNAPSHOT=false
+
+            if ! echo "${RAW_VERSION}" | grep -qE '^[0-9]+\.[0-9]+(\.[0-9]+)?$'; then
+              echo "::error::version 입력값이 올바르지 않습니다: '${RAW_VERSION}' (허용 형식: 'snapshot', 'X.Y' 예:25.12, 'X.Y.Z' 예:24.10.3)"
               exit 1
             fi
-            echo "자동 선택된 최신 버전: ${VERSION}"
+
+            DOT_COUNT=$(echo "${RAW_VERSION}" | tr -cd '.' | wc -c)
+            if [ "${DOT_COUNT}" -eq 2 ]; then
+              # 이미 패치버전까지 지정된 경우(X.Y.Z)는 그대로 사용
+              RESOLVED_VERSION="${RAW_VERSION}"
+            else
+              # X.Y 브랜치만 지정된 경우: releases/ 인덱스에서 해당 브랜치의
+              # -rc가 아닌 최신 패치버전(X.Y.N)을 자동으로 찾는다.
+              # href="25.12.5/" 처럼 슬래시 바로 앞에 숫자가 오는 것만 매칭하므로
+              # href="25.12.0-rc1/" 같은 프리릴리스는 자동으로 제외된다.
+              BRANCH_ESCAPED=$(echo "${RAW_VERSION}" | sed 's/\./\\./g')
+              RELEASES_PAGE=$(curl -fsSL "https://downloads.openwrt.org/releases/")
+              RESOLVED_VERSION=$(echo "${RELEASES_PAGE}" \
+                | grep -oE "href=\"${BRANCH_ESCAPED}\.[0-9]+/\"" \
+                | grep -oE "${BRANCH_ESCAPED}\.[0-9]+" \
+                | sort -t. -k3 -n \
+                | tail -n1)
+
+              if [ -z "${RESOLVED_VERSION}" ]; then
+                echo "::error::'${RAW_VERSION}' 브랜치의 stable 릴리스를 releases/ 목록에서 찾지 못했습니다. (예: 25.12, 24.10)"
+                exit 1
+              fi
+              echo "'${RAW_VERSION}' 브랜치 → 최신 stable 버전으로 자동 해석됨: ${RESOLVED_VERSION}"
+            fi
+
+            DOWNLOAD_BASE="https://downloads.openwrt.org/releases/${RESOLVED_VERSION}/targets/${TARGET}/${SUBTARGET}"
+            VERSION="${RESOLVED_VERSION}"
           fi
 
-          DOWNLOAD_BASE="https://downloads.openwrt.org/releases/${VERSION}/targets/${TARGET}/${SUBTARGET}"
           PAGE=$(curl -fsSL "${DOWNLOAD_BASE}/")
 
           IB_FILE=$(echo "${PAGE}" | grep -oE "openwrt-imagebuilder-[^\"]+\.tar\.zst" | head -n1)
           SDK_FILE=$(echo "${PAGE}" | grep -oE "openwrt-sdk-[^\"]+\.tar\.zst" | head -n1)
 
           if [ -z "${IB_FILE}" ] || [ -z "${SDK_FILE}" ]; then
-            echo "::error::${TARGET}/${SUBTARGET} 용 ImageBuilder/SDK 파일을 ${VERSION}에서 찾지 못했습니다."
+            echo "::error::${TARGET}/${SUBTARGET} 용 ImageBuilder/SDK 파일을 ${DOWNLOAD_BASE} 에서 찾지 못했습니다."
             echo "${PAGE}"
             exit 1
           fi
 
+          # ImageBuilder는 커널 소스가 없어 initramfs 이미지를 스스로 만들지 못한다
+          # (include/image.mk의 initramfs-images 룰이 $(IB)가 설정된 경우 비활성화됨).
+          # 그래서 openwrt.org가 미리 빌드해 올려둔 이 프로필용 공식 initramfs
+          # 이미지 파일명을 같은 디렉터리 목록에서 찾아둔다 (복구/최초 설치용).
+          # 접미사(-ubootmod-, -stock- 등)가 기기마다 달라 "PROFILE-...initramfs..." 형태로 넓게 매칭한다.
+          INITRAMFS_FILES=$(echo "${PAGE}" | grep -oE "openwrt-${TARGET}-${SUBTARGET}-${PROFILE}-[^\"]*initramfs[^\"]*\.(bin|itb|elf)" | sort -u || true)
+
+          if [ -z "${INITRAMFS_FILES}" ]; then
+            echo "::warning::${PROFILE} 프로필용 공식 initramfs 이미지를 ${DOWNLOAD_BASE} 에서 찾지 못했습니다. 이 디바이스는 initramfs 이미지를 제공하지 않을 수 있습니다."
+          fi
+
+          echo "is_snapshot=${IS_SNAPSHOT}" >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "download_base=${DOWNLOAD_BASE}" >> "$GITHUB_OUTPUT"
           echo "ib_file=${IB_FILE}" >> "$GITHUB_OUTPUT"
           echo "sdk_file=${SDK_FILE}" >> "$GITHUB_OUTPUT"
           echo "ib_url=${DOWNLOAD_BASE}/${IB_FILE}" >> "$GITHUB_OUTPUT"
           echo "sdk_url=${DOWNLOAD_BASE}/${SDK_FILE}" >> "$GITHUB_OUTPUT"
+          {
+            echo "initramfs_files<<INITRAMFS_EOF"
+            echo "${INITRAMFS_FILES}"
+            echo "INITRAMFS_EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: 다운로드 캐시
         uses: actions/cache@v4
@@ -170,7 +217,7 @@ jobs:
       #    그리고 luci-theme-uniwrt(테마) 모두 별도 프리빌트 피드가 없으므로
       #    SDK에서 소스로 직접 컴파일한다.
       #    ※ SDK는 다운로드한 시점의 .config에 따라 opkg/apk 중 하나로 이미
-      #      고정되어 있으므로(24.10=opkg, 25.x=apk), 이 단계 자체는 두 경우
+      #      고정되어 있으므로(24.10=opkg, 25.12+=apk), 이 단계 자체는 두 경우
       #      모두 동일한 make 커맨드로 동작한다. 산출물 확장자만 .ipk/.apk로 달라진다.
       # ---------------------------------------------------------------
       - name: SDK 다운로드 및 압축 해제
@@ -342,7 +389,7 @@ jobs:
         id: theme_ipk
         run: |
           set -euo pipefail
-          # 24.10(opkg)에서는 .ipk, 25.x(apk)에서는 .apk로 산출물이 나오므로
+          # 24.10(opkg)에서는 .ipk, 25.12+(apk)에서는 .apk로 산출물이 나오므로
           # 두 확장자를 모두 찾는다.
           mkdir -p custom-packages
           find sdk/bin/packages \
@@ -374,10 +421,11 @@ jobs:
           # clashoo와 uniwrt 테마 모두 원격 프리빌트 피드가 없으므로(SDK에서 이미
           # 직접 컴파일했으므로) 여기서는 로컬 custom-packages 피드만 등록하면 된다.
           #
-          # ImmortalWrt/OpenWrt는 25.12부터 패키지 매니저가 opkg에서 apk로 바뀌었다.
+          # OpenWrt는 25.12부터 패키지 매니저가 opkg에서 apk로 바뀌었다.
           # 로컬 커스텀 피드 등록 방식, 서명 검증 끄는 방법, 인덱스 파일 형식이
           # opkg와 apk에서 완전히 다르므로 여기서 분기 처리한다.
-          # (판별은 브랜치 문자열이 아니라 ImageBuilder 자체의 .config를 기준으로 한다)
+          # (판별은 버전 문자열이 아니라 ImageBuilder 자체의 .config를 기준으로 하므로
+          #  snapshot/stable, 버전 번호와 무관하게 항상 정확하게 동작한다)
           if grep -qs '^CONFIG_USE_APK=y' .config; then
             echo "패키지 매니저: apk"
             echo "pkg_manager=apk" >> "$GITHUB_OUTPUT"
@@ -547,8 +595,8 @@ jobs:
         run: |
           set -euo pipefail
           # ImageBuilder는 커널 소스가 없어 initramfs 이미지를 직접 만들 수 없으므로,
-          # openwrt.org snapshots에 이미 빌드되어 있는 공식 initramfs 이미지를 그대로 받아
-          # 아티팩트/릴리스에 함께 포함시킨다.
+          # (snapshot이면 snapshots/, stable이면 releases/<version>/에) 이미 빌드되어
+          # 있는 공식 initramfs 이미지를 그대로 받아 아티팩트/릴리스에 함께 포함시킨다.
           # ⚠ 이 이미지에는 uniwrt 테마, clashoo 등 커스텀 패키지가 들어있지 않다.
           #    TFTP 복구, 최초 설치(공유기가 아직 벽돌/순정 상태일 때) 용도로만 사용하고,
           #    설치 후에는 위에서 만든 squashfs-sysupgrade 이미지로 sysupgrade 하면 된다.
@@ -577,11 +625,12 @@ jobs:
 
           # 버전/URL 해석 결과
           cat > "${DBG}/resolve-info.txt" <<EOF
-          version=${{ steps.resolve.outputs.version }}
+          version_input=${VERSION_INPUT}
+          resolved_version=${{ steps.resolve.outputs.version }}
+          is_snapshot=${{ steps.resolve.outputs.is_snapshot }}
           target=${TARGET}
           subtarget=${SUBTARGET}
           profile=${PROFILE}
-          source=snapshots
           clashoo_repo=${CLASHOO_REPO}
           uniwrt_repo=${UNIWRT_REPO}
           arch_packages=${{ steps.repo.outputs.arch_packages }}
@@ -639,7 +688,7 @@ jobs:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: "OpenWrt ${{ steps.resolve.outputs.version }} - ${{ env.PROFILE }}"
           body: |
-            - Base: OpenWrt ${{ steps.resolve.outputs.version }}
+            - Base: OpenWrt ${{ steps.resolve.outputs.version }} (${{ steps.resolve.outputs.is_snapshot == 'true' && 'snapshot' || 'stable release' }}, 입력값: `${{ env.VERSION_INPUT }}`)
             - Target/Subtarget: ${{ env.TARGET }}/${{ env.SUBTARGET }}
             - Profile: ${{ env.PROFILE }}
             - Package manager: ${{ steps.repo.outputs.pkg_manager }}
