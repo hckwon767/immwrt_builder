@@ -589,6 +589,39 @@ jobs:
             -j"$(nproc)" V=s 2>&1 | tee ../image-build.log
           ls -la bin/targets/*/*/
 
+      - name: 산출물 파일명에 버전 접두사 붙이기
+        run: |
+          set -euo pipefail
+
+          if [ "${{ steps.resolve.outputs.is_snapshot }}" = "true" ]; then
+            LABEL="snapshot"
+          else
+            LABEL="${{ steps.resolve.outputs.version }}"
+          fi
+          echo "적용할 라벨: ${LABEL}"
+
+    # bin/targets 밑의 실제 타겟 디렉터리로 이동
+    # (target/subtarget 조합상 디렉터리가 하나뿐이라는 전제 하에 * 로 매칭)
+          TARGET_DIR=$(echo imagebuilder/bin/targets/*/*/)
+          cd "${TARGET_DIR}"
+
+    # 리네임 대상: 실제 "이미지" 파일 확장자만 화이트리스트로 지정.
+    # sha256sums / *.manifest / profiles.json / Packages* / packages.adb 등은
+    # 내부에 원본 파일명이 텍스트로 박혀있으므로 여기서 제외한다.
+          shopt -s nullglob
+          for f in *.bin *.img *.img.gz *.itb *.elf *.ubi *.trx *.chk *.vmlinux; do
+      # 이미 라벨이 붙어있으면 중복 방지(재실행 대비)
+            case "$f" in
+              "${LABEL}_"*) continue ;;
+            esac
+            echo "리네임: ${f} -> ${LABEL}_${f}"
+            mv -- "$f" "${LABEL}_${f}"
+          done
+          shopt -u nullglob
+
+          echo "── 최종 파일 목록 ──"
+          ls -la
+    
       - name: 공식 initramfs 이미지 다운로드 (복구/최초 설치용)
         run: |
           set -euo pipefail
