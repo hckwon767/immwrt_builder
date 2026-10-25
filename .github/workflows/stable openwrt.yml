@@ -389,14 +389,16 @@ jobs:
         id: theme_ipk
         run: |
           set -euo pipefail
-          # 24.10(opkg)에서는 .ipk, 25.12+(apk)에서는 .apk로 산출물이 나오므로
-          # 두 확장자를 모두 찾는다.
           mkdir -p custom-packages
           find sdk/bin/packages \
-            \( -iname "${CLASHOO_PKG}*.ipk"    -o -iname "${CLASHOO_LUCI_PKG}*.ipk"    -o -iname "${CLASHOO_LUCI_I18N_KO_PKG}*.ipk" -o -iname "${UNIWRT_PKG}*.ipk" \
-               -o -iname "${CLASHOO_PKG}*.apk" -o -iname "${CLASHOO_LUCI_PKG}*.apk"    -o -iname "${CLASHOO_LUCI_I18N_KO_PKG}*.apk" -o -iname "${UNIWRT_PKG}*.apk" \) \
+            \( -iname "${CLASHOO_PKG}*.ipk"  -o -iname "${CLASHOO_LUCI_PKG}*.ipk"  -o -iname "luci-i18n-clashoo-*.ipk"  -o -iname "${UNIWRT_PKG}*.ipk" \
+               -o -iname "${CLASHOO_PKG}*.apk" -o -iname "${CLASHOO_LUCI_PKG}*.apk" -o -iname "luci-i18n-clashoo-*.apk" -o -iname "${UNIWRT_PKG}*.apk" \) \
             -exec cp -f {} custom-packages/ \;
           ls -la custom-packages/
+          # 필수 패키지 누락 시 여기서 바로 실패시키기
+          for p in "${CLASHOO_PKG}" "${CLASHOO_LUCI_PKG}" luci-i18n-clashoo-zh-cn "${CLASHOO_LUCI_I18N_KO_PKG}" "${UNIWRT_PKG}"; do
+            ls custom-packages/${p}[-_]* >/dev/null 2>&1 || { echo "::error::${p} 산출물 없음"; exit 1; }
+          done
 
       # ---------------------------------------------------------------
       # 3) ImageBuilder 단계
